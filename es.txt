@@ -1,6 +1,9 @@
 helm repo add elastic https://helm.elastic.co
 helm repo update
 
+helm pull elastic/elasticsearch --version 8.13.4 --untar
+
+
 cat elasticsearch-values.yaml
 
 resources:
