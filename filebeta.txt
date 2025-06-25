@@ -1,7 +1,4 @@
-helm install filebeat elastic/filebeat -f filebeat-values.yaml
-helm pull elastic/filebeat --version 8.5.1 --untar
-
-# filebeat-values.yaml
+# filebeat-values-fixed.yaml
 filebeatConfig:
   filebeat.yml: |
     filebeat.inputs:
@@ -19,13 +16,28 @@ filebeatConfig:
       hosts: ["https://elasticsearch-master:9200"]
       username: "${ELASTICSEARCH_USERNAME}"
       password: "${ELASTICSEARCH_PASSWORD}"
-      ssl.verification_mode: none
+      ssl:
+        enabled: true
+        verification_mode: none
+        certificate_authorities: ["/usr/share/filebeat/certs/ca.crt"]
       index: "aks-logs-%{+yyyy.MM.dd}"
       
     setup.template.name: "aks-logs"
     setup.template.pattern: "aks-logs-*"
+    
+    # Disable the readiness probe check or configure it properly
+    http:
+      enabled: true
+      host: "0.0.0.0"
+      port: 5066
 
-# Environment variables pointing to your secret
+    # Use temp directory for data
+    path.data: /tmp/filebeat-data
+    
+    # Configure logging
+    logging.level: info
+    logging.to_stderr: true
+
 extraEnvs:
 - name: ELASTICSEARCH_USERNAME
   valueFrom:
@@ -38,6 +50,48 @@ extraEnvs:
       name: elasticsearch-master-credentials
       key: password
 
-# Deploy as DaemonSet to collect logs from all namespaces
-daemonset:
-  enabled: true
+# Override readiness probe to fix the connection issue
+readinessProbe:
+  exec:
+    command:
+    - sh
+    - -c
+    - |
+      #!/usr/bin/env bash -e
+      # Test if filebeat can reach elasticsearch
+      curl -k -u ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD} \
+        "https://elasticsearch-master.default.svc.cluster.local:9200/_cluster/health" || \
+      curl -u ${ELASTICSEARCH_USERNAME}:${ELASTICSEARCH_PASSWORD} \
+        "http://elasticsearch-master.default.svc.cluster.local:9200/_cluster/health"
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Override liveness probe
+livenessProbe:
+  exec:
+    command:
+    - sh
+    - -c
+    - |
+      #!/usr/bin/env bash -e
+      curl --fail 127.0.0.1:5066 || exit 1
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+extraInitContainers:
+- name: init-cleanup
+  image: busybox:1.35
+  command:
+  - /bin/sh
+  - -c
+  - |
+    echo "Initializing filebeat data directory..."
+    mkdir -p /tmp/filebeat-data
+    rm -f /tmp/filebeat-data/filebeat.lock
+    echo "Initialization completed"
+  securityContext:
+    runAsUser: 0
