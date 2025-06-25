@@ -1,0 +1,39 @@
+helm install filebeat elastic/filebeat -f filebeat-values.yaml
+
+
+# filebeat-values.yaml
+filebeatConfig:
+  filebeat.yml: |
+    filebeat.inputs:
+    - type: container
+      paths:
+        - /var/log/containers/*.log
+      processors:
+        - add_kubernetes_metadata:
+            host: ${NODE_NAME}
+            matchers:
+            - logs_path:
+                logs_path: "/var/log/containers/"
+
+    output.elasticsearch:
+      hosts: ["elasticsearch-es-http.elastic-system.svc.cluster.local:9200"]
+      username: "elastic"
+      password: "${ELASTICSEARCH_PASSWORD}"
+      ssl.verification_mode: none
+      index: "aks-logs-%{+yyyy.MM.dd}"
+      
+    setup.template.name: "aks-logs"
+    setup.template.pattern: "aks-logs-*"
+  
+
+# Environment variables
+extraEnvs:
+- name: ELASTICSEARCH_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: elasticsearch-es-elastic-user
+      key: elastic
+
+# Deploy on all nodes to collect logs from all namespaces
+daemonset:
+  enabled: true
