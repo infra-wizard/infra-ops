@@ -16,24 +16,28 @@ filebeatConfig:
                 logs_path: "/var/log/containers/"
 
     output.elasticsearch:
-      hosts: ["elasticsearch-es-http.elastic-system.svc.cluster.local:9200"]
-      username: "elastic"
+      hosts: ["https://elasticsearch-master:9200"]
+      username: "${ELASTICSEARCH_USERNAME}"
       password: "${ELASTICSEARCH_PASSWORD}"
       ssl.verification_mode: none
       index: "aks-logs-%{+yyyy.MM.dd}"
       
     setup.template.name: "aks-logs"
     setup.template.pattern: "aks-logs-*"
-  
 
-# Environment variables
+# Environment variables pointing to your secret
 extraEnvs:
+- name: ELASTICSEARCH_USERNAME
+  valueFrom:
+    secretKeyRef:
+      name: elasticsearch-master-credentials
+      key: username
 - name: ELASTICSEARCH_PASSWORD
   valueFrom:
     secretKeyRef:
-      name: elasticsearch-es-elastic-user
-      key: elastic
+      name: elasticsearch-master-credentials
+      key: password
 
-# Deploy on all nodes to collect logs from all namespaces
+# Deploy as DaemonSet to collect logs from all namespaces
 daemonset:
   enabled: true
