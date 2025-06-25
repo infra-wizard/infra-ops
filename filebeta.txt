@@ -1,5 +1,5 @@
 helm install filebeat elastic/filebeat -f filebeat-values.yaml
-
+helm pull elastic/filebeat --version 8.5.1 --untar
 
 # filebeat-values.yaml
 filebeatConfig:
