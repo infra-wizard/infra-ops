@@ -1,0 +1,19 @@
+# Create the promtail configuration
+cat > promtail-values.yaml << EOF
+config:
+  clients:
+    - url: http://loki-gateway.observability.svc.cluster.local:3100/loki/api/v1/push
+      tenant_id: 1
+
+# Make sure it runs on all nodes to collect all pod logs  
+tolerations:
+  - effect: NoSchedule
+    operator: Exists
+  - effect: NoExecute
+    operator: Exists
+EOF
+
+# Install Promtail
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+helm install promtail grafana/promtail -f promtail-values.yaml -n observability
