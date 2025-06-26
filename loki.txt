@@ -47,3 +47,15 @@ gateway:
 
 ---------
 helm upgrade --install loki grafana/loki -f loki.yaml -n observability
+---------
+###
+Check if there are authentication/header requirements:
+Some Grafana setups require specific configurations. Try adding these to your Loki data source in Grafana:
+In Grafana Data Source settings:
+
+URL: http://loki-gateway.observability.svc.cluster.local:3100
+HTTP Headers: Add a custom header:
+
+Header: X-Scope-OrgID
+Value: 1
+###
