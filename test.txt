@@ -1,0 +1,5 @@
+apt-get update && apt-get install -y zlib1g=1:1.3.0.dfsg-1 zlib1g-dev=1:1.3.0.dfsg-1
+
+apt-get update && apt-get upgrade libaom3
+
+apt-get update && apt-get upgrade libxml2
