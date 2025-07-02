@@ -17,3 +17,5 @@ trivy --version
 pip install --no-cache-dir --break-system-packages -r requirements.txt
 
 python3 /tmp/app/scanner.py
+
+curl -sL https://aka.ms/InstallAzureCLIDeb | bash
