@@ -19,3 +19,8 @@ pip install --no-cache-dir --break-system-packages -r requirements.txt
 python3 /tmp/app/scanner.py
 
 curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+requirements.txt
+kubernetes==28.1.0
+Flask==2.0.3
+Werkzeug==2.0.3
