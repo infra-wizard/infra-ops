@@ -1,3 +1,5 @@
+ubuntu:latest
+
 apt-get install -y python3 python3-pip curl wget ca-certificates
 
 echo "📦 Installing Trivy from GitHub..."
