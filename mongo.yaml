@@ -1,6 +1,5 @@
-# MongoDB Deployment for Diffy Application
+# MongoDB Deployment for Diffy Application (AKS - No PVC)
 # This includes all necessary Kubernetes resources
-
 ---
 # MongoDB Service
 apiVersion: v1
@@ -19,7 +18,6 @@ spec:
       targetPort: 27017
       protocol: TCP
   type: ClusterIP
-
 ---
 # MongoDB Deployment
 apiVersion: apps/v1
@@ -82,26 +80,7 @@ spec:
           failureThreshold: 3
       volumes:
       - name: mongodb-data
-        persistentVolumeClaim:
-          claimName: mongodb-pvc
-
----
-# PersistentVolumeClaim for MongoDB data
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: mongodb-pvc
-  namespace: default
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
-  # For EKS, use gp2 or gp3
-  # For AKS, use default or managed-premium
-  storageClassName: gp2  # Change to "default" for AKS
-
+        emptyDir: {}
 ---
 # Optional: ConfigMap for MongoDB configuration
 apiVersion: v1
