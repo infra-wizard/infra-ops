@@ -1,5 +1,7 @@
 # MongoDB Deployment for Diffy Application (AKS - No PVC)
 # This includes all necessary Kubernetes resources
+# --spring.data.mongodb.uri=mongodb://localhost:27017/diffy
+# java -jar diffy.jar   --candidate=localhost:3000   --master.primary=localhost:3000   --master.secondary=localhost:3000   --service.protocol=http   --serviceName=sample-app   --proxy.port=8880   --admin.port=8881   --summary.email=your-email@example.com   --spring.data.mongodb.uri=mongodb://localhost:27017/diffy
 ---
 # MongoDB Service
 apiVersion: v1
