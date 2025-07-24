@@ -103,7 +103,7 @@ def extract_src_info(recipe_path, machine_type):
         if "SRC_URI" in line and ("git" in line or "github" in line):
             logging.info(f"Line {i+1}: Processing SRC_URI with git: {line}")
             
-            # Try multiple git URL patterns - fixed syntax
+            # Try multiple git URL patterns - made more permissive
             patterns = [
                 (r'gitsm://git@([^;]+)', 'gitsm://git@'),
                 (r'gitsm://([^;]+)', 'gitsm://'),
@@ -112,7 +112,10 @@ def extract_src_info(recipe_path, machine_type):
                 (r'git://([^;]+)', 'git://'),
                 (r'https://([^;]+)', 'https://'),
                 (r'git@([^;]+)', 'git@'),
-                (r'git@([^"\\s;]+)', 'git@flexible'),
+                (r'"([^"]*github\.com[^"]*)"', 'quoted github'),
+                # More permissive fallback patterns
+                (r'([^"\s]+github\.com[^"\s;]+)', 'github flexible'),
+                (r'([^"\s]+\.git)', 'any .git'),
             ]
             
             for pattern, pattern_name in patterns:
@@ -135,8 +138,9 @@ def extract_src_info(recipe_path, machine_type):
             logging.info(f"Line {i+1}: Found SRCREV line: {line}")
             patterns = [
                 r'SRCREV\s*=\s*"([^"]+)"',
-                r"SRCREV\\s*=\\s*'([^']+)'",
-                r'SRCREV\s*=\s*([a-f0-9]+)',
+                r"SRCREV\s*=\s*'([^']+)'",
+                r'SRCREV\s*=\s*([a-f0-9]{6,})',  # Made more flexible - 6+ hex chars
+                r'SRCREV\s*=\s*([^\s;]+)',       # Any non-whitespace value
             ]
             for pattern in patterns:
                 match = re.search(pattern, line)
@@ -148,8 +152,8 @@ def extract_src_info(recipe_path, machine_type):
             logging.info(f"Line {i+1}: Found SRCBRANCH line: {line}")
             patterns = [
                 r'SRCBRANCH\s*=\s*"([^"]+)"',
-                r"SRCBRANCH\\s*=\\s*'([^']+)'",
-                r'SRCBRANCH\s*=\s*([^\\s]+)',
+                r"SRCBRANCH\s*=\s*'([^']+)'",
+                r'SRCBRANCH\s*=\s*([^\s;]+)',    # Any non-whitespace value
             ]
             for pattern in patterns:
                 match = re.search(pattern, line)
@@ -200,8 +204,9 @@ def extract_src_info(recipe_path, machine_type):
                             logging.info(f"    Line {line_num+1}: Found SRCREV line: {line}")
                             patterns = [
                                 r'SRCREV\s*=\s*"([^"]+)"',
-                                r"SRCREV\\s*=\\s*'([^']+)'",
-                                r'SRCREV\s*=\s*([a-f0-9]+)',
+                                r"SRCREV\s*=\s*'([^']+)'",
+                                r'SRCREV\s*=\s*([a-f0-9]{6,})',
+                                r'SRCREV\s*=\s*([^\s;]+)',
                             ]
                             for pattern_regex in patterns:
                                 match = re.search(pattern_regex, line)
@@ -214,8 +219,8 @@ def extract_src_info(recipe_path, machine_type):
                             logging.info(f"    Line {line_num+1}: Found SRCBRANCH line: {line}")
                             patterns = [
                                 r'SRCBRANCH\s*=\s*"([^"]+)"',
-                                r"SRCBRANCH\\s*=\\s*'([^']+)'",
-                                r'SRCBRANCH\s*=\s*([^\\s]+)',
+                                r"SRCBRANCH\s*=\s*'([^']+)'",
+                                r'SRCBRANCH\s*=\s*([^\s;]+)',
                             ]
                             for pattern_regex in patterns:
                                 match = re.search(pattern_regex, line)
@@ -252,8 +257,9 @@ def extract_src_info(recipe_path, machine_type):
                                 if src_rev is None and "SRCREV" in line:
                                     patterns = [
                                         r'SRCREV\s*=\s*"([^"]+)"',
-                                        r"SRCREV\\s*=\\s*'([^']+)'",
-                                        r'SRCREV\s*=\s*([a-f0-9]+)',
+                                        r"SRCREV\s*=\s*'([^']+)'",
+                                        r'SRCREV\s*=\s*([a-f0-9]{6,})',
+                                        r'SRCREV\s*=\s*([^\s;]+)',
                                     ]
                                     for pattern in patterns:
                                         match = re.search(pattern, line)
@@ -265,8 +271,8 @@ def extract_src_info(recipe_path, machine_type):
                                 if src_branch is None and "SRCBRANCH" in line:
                                     patterns = [
                                         r'SRCBRANCH\s*=\s*"([^"]+)"',
-                                        r"SRCBRANCH\\s*=\\s*'([^']+)'",
-                                        r'SRCBRANCH\s*=\s*([^\\s]+)',
+                                        r"SRCBRANCH\s*=\s*'([^']+)'",
+                                        r'SRCBRANCH\s*=\s*([^\s;]+)',
                                     ]
                                     for pattern in patterns:
                                         match = re.search(pattern, line)
@@ -286,13 +292,52 @@ def extract_src_info(recipe_path, machine_type):
 def clone_and_describe_repo(src_uri, src_branch, src_rev):
     with tempfile.TemporaryDirectory() as repo_dir:
         try:
-            subprocess.run(["git", "clone", "-b", src_branch, src_uri, repo_dir], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            subprocess.run(["git", "checkout", src_rev], cwd=repo_dir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            result = subprocess.run(["git", "describe", "--tags"], cwd=repo_dir, capture_output=True, text=True, check=True)
-            return result.stdout.strip()
+            # Construct proper git URL
+            if not src_uri.startswith(('http://', 'https://', 'git://', 'gitsm://')):
+                if 'github.com' in src_uri:
+                    git_url = f"https://{src_uri}"
+                else:
+                    git_url = f"git://{src_uri}"
+            else:
+                git_url = src_uri
+            
+            logging.info(f"Attempting to clone: {git_url}")
+            
+            # Try cloning with the branch
+            result = subprocess.run(
+                ["git", "clone", "-b", src_branch, git_url, repo_dir], 
+                check=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Checkout specific revision
+            subprocess.run(
+                ["git", "checkout", src_rev], 
+                cwd=repo_dir, 
+                check=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE
+            )
+            
+            # Get tag description
+            result = subprocess.run(
+                ["git", "describe", "--tags"], 
+                cwd=repo_dir, 
+                capture_output=True, 
+                text=True, 
+                check=True
+            )
+            tag = result.stdout.strip()
+            logging.info(f"Successfully got tag: {tag}")
+            return tag
+            
         except subprocess.CalledProcessError as e:
             logging.error(f"Git operation failed for {src_uri}: {e}")
-            return None
+            logging.error(f"stderr: {e.stderr if hasattr(e, 'stderr') else 'No stderr'}")
+            # Return a fallback tag based on the revision
+            return f"rev-{src_rev[:8]}" if src_rev else None
 
 def main():
     print("Starting package version finder script...")
