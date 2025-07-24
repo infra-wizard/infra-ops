@@ -87,10 +87,231 @@ def extract_src_info(recipe_path, machine_type):
     for line in lines:
         line = line.strip()
         if "SRC_URI" in line and "git" in line:
-            match = re.search(r'git://([^;]+)', line)
-            if match:
-                src_uri = match.group(1)
-                src_uri = re.sub(r'\.com/', '.com/', src_uri)
+            # Try multiple git URL patterns
+            patterns = [
+                r'git://([^;]+)',           # git://example.com/repo
+                r'https://([^;]+)\.git',    # https://example.com/repo.git
+                r'git@([^;]+)',             # git@example.com:repo
+                r'"([^"]*github\.com[^"]*)"', # "https://github.com/user/repo"
+                r'git://([^";\s]+)',        # more flexible git://
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, line)
+                if match:
+                    src_uri = match.group(1)
+                    # Clean up the URI
+                    src_uri = re.sub(r'\.git
+        elif "SRCREV" in line:
+            patterns = [
+                r'SRCREV\s*=\s*"([^"]+)"',      # SRCREV = "hash"
+                r'SRCREV\s*=\s*\'([^\']+)\'',   # SRCREV = 'hash'  
+                r'SRCREV\s*=\s*([a-f0-9]+)',    # SRCREV = hash
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, line)
+                if match:
+                    src_rev = match.group(1)
+                    logging.info(f"Found SRCREV: {src_rev}")
+                    break
+        elif "SRCBRANCH" in line:
+            patterns = [
+                r'SRCBRANCH\s*=\s*"([^"]+)"',    # SRCBRANCH = "branch"
+                r'SRCBRANCH\s*=\s*\'([^\']+)\'', # SRCBRANCH = 'branch'
+                r'SRCBRANCH\s*=\s*([^\s]+)',     # SRCBRANCH = branch
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, line)
+                if match:
+                    src_branch = match.group(1)
+                    logging.info(f"Found SRCBRANCH: {src_branch}")
+                    break
+    
+    # If SRCREV or SRCBRANCH are missing, search for them in related files
+    if machine_type and (src_rev is None or src_branch is None):
+        recipe_dir = os.path.dirname(recipe_path)
+        recipe_filename = os.path.basename(recipe_path)
+        
+        # Extract base name (remove .inc or .bb extension)
+        if recipe_filename.endswith('.inc'):
+            base_name = recipe_filename[:-4]  # Remove .inc
+        elif recipe_filename.endswith('.bb'):
+            base_name = recipe_filename[:-3]   # Remove .bb
+        else:
+            base_name = recipe_filename
+        
+        logging.info(f"Searching for missing info for {recipe_filename}, base_name: {base_name}, machine_type: {machine_type}")
+        
+        # Look for machine-specific files in the same directory
+        # Handle both patterns: base_name_version.bb and base_name-version.bb
+        possible_patterns = [
+            f"{base_name}_{machine_type}.bb",
+            f"{base_name}-{machine_type}.bb",
+            f"{base_name}.{machine_type}.bb"
+        ]
+        
+        for pattern in possible_patterns:
+            target_file = os.path.join(recipe_dir, pattern)
+            if os.path.exists(target_file):
+                logging.info(f"Found machine-specific file: {target_file}")
+                
+                # Extract missing info from the machine-specific file
+                with open(target_file, 'r') as file:
+                    for line in file:
+                        line = line.strip()
+                        if src_rev is None and "SRCREV" in line:
+                            match = re.search(r'SRCREV\s*=\s*"([^"]+)"', line)
+                            if match:
+                                src_rev = match.group(1)
+                                logging.info(f"Found SRCREV in {pattern}: {src_rev}")
+                        
+                        if src_branch is None and "SRCBRANCH" in line:
+                            match = re.search(r'SRCBRANCH\s*=\s*"([^"]+)"', line)
+                            if match:
+                                src_branch = match.group(1)
+                                logging.info(f"Found SRCBRANCH in {pattern}: {src_branch}")
+                        
+                        # Break early if we found both
+                        if src_rev and src_branch:
+                            break
+                
+                # If we found what we needed, break from pattern loop
+                if src_rev and src_branch:
+                    break
+        
+        # If still missing, try searching ALL .bb files in the directory
+        if src_rev is None or src_branch is None:
+            logging.info(f"Still missing info for {recipe_path}, searching all .bb files in directory")
+            
+            try:
+                for filename in os.listdir(recipe_dir):
+                    if filename.endswith('.bb') and filename.startswith(base_name):
+                        target_file = os.path.join(recipe_dir, filename)
+                        logging.info(f"Checking file: {filename}")
+                        
+                        with open(target_file, 'r') as file:
+                            content = file.read()
+                            # Handle multi-line entries
+                            content = re.sub(r'\\\s*\n\s*', ' ', content)
+                            file_lines = content.split('\n')
+                            
+                            for line in file_lines:
+                                line = line.strip()
+                                if src_rev is None and "SRCREV" in line:
+                                    patterns = [
+                                        r'SRCREV\s*=\s*"([^"]+)"',      # SRCREV = "hash"
+                                        r'SRCREV\s*=\s*\'([^\']+)\'',   # SRCREV = 'hash'  
+                                        r'SRCREV\s*=\s*([a-f0-9]+)',    # SRCREV = hash
+                                    ]
+                                    for pattern in patterns:
+                                        match = re.search(pattern, line)
+                                        if match:
+                                            src_rev = match.group(1)
+                                            logging.info(f"Found SRCREV in {filename}: {src_rev}")
+                                            break
+                                
+                                if src_branch is None and "SRCBRANCH" in line:
+                                    patterns = [
+                                        r'SRCBRANCH\s*=\s*"([^"]+)"',    # SRCBRANCH = "branch"
+                                        r'SRCBRANCH\s*=\s*\'([^\']+)\'', # SRCBRANCH = 'branch'
+                                        r'SRCBRANCH\s*=\s*([^\s]+)',     # SRCBRANCH = branch
+                                    ]
+                                    for pattern in patterns:
+                                        match = re.search(pattern, line)
+                                        if match:
+                                            src_branch = match.group(1)
+                                            logging.info(f"Found SRCBRANCH in {filename}: {src_branch}")
+                                            break
+            except Exception as e:
+                logging.error(f"Error searching directory {recipe_dir}: {e}")
+    
+    return src_uri, src_rev, src_branch
+
+def clone_and_describe_repo(src_uri, src_branch, src_rev):
+    with tempfile.TemporaryDirectory() as repo_dir:
+        try:
+            subprocess.run(["git", "clone", "-b", src_branch, src_uri, repo_dir], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(["git", "checkout", src_rev], cwd=repo_dir, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = subprocess.run(["git", "describe", "--tags"], cwd=repo_dir, capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Git operation failed for {src_uri}: {e}")
+            return None
+
+def main():
+    print("Starting package version finder script...")
+    parser = argparse.ArgumentParser(description="Read and parse pn-buildlist file.")
+    parser.add_argument("--buildlist-path", required=True, help="Path to the pn-buildlist file")
+    parser.add_argument("--yocto-layers-path", required=True, help="Path to the Yocto source layers (BitBake recipes)")
+    
+    args = parser.parse_args()
+    print(f"Arguments parsed - buildlist: {args.buildlist_path}, yocto: {args.yocto_layers_path}")
+    
+    validate_path(args.buildlist_path, "pn-buildlist path")
+    validate_path(args.yocto_layers_path, "Yocto source layers path")
+    
+    print("Reading buildlist...")
+    buildlist_entries, package_names = read_buildlist(args.buildlist_path)
+    print(f"Found {len(package_names)} packages in buildlist")
+    
+    print("Finding recipes...")
+    recipes_found, recipes_not_found, recipe_paths = find_recipes(args.yocto_layers_path, package_names)
+    print(f"Found {len(recipes_found)} recipes, missing {len(recipes_not_found)} recipes")
+    
+    package_info = {}
+    print(f"Processing {len(recipe_paths)} recipes...")
+    
+    for recipe, path in recipe_paths.items():
+        print(f"Processing: {recipe}")
+        machine = next((entry[0] for entry in buildlist_entries if entry[1] == recipe), None)
+        
+        # Extract machine type from machine string (e.g., "2.0" from "rcrip2-0")
+        machine_type = None
+        if machine:
+            # Try multiple patterns to extract version from machine string
+            patterns = [
+                r'(\d+\.\d+)',           # matches "2.0" in "2.0" 
+                r'rcrip(\d+)-(\d+)',     # matches "rcrip2-0" -> "2.0"
+                r'.*?(\d+)-(\d+)',       # matches any "X-Y" -> "X.Y"
+                r'.*?(\d+)\.(\d+)',      # matches any "X.Y"
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, machine)
+                if match:
+                    if len(match.groups()) == 2:
+                        machine_type = f"{match.group(1)}.{match.group(2)}"
+                    else:
+                        machine_type = match.group(1)
+                    break
+            
+            logging.info(f"Machine: {machine} -> Machine Type: {machine_type}")
+        
+        logging.info(f"Processing recipe: {recipe}, machine: {machine}, machine_type: {machine_type}")
+        
+        src_uri, src_rev, src_branch = extract_src_info(path, machine_type)
+        
+        if src_uri and src_rev and src_branch:
+            tag = clone_and_describe_repo(src_uri, src_branch, src_rev)
+            package_info[recipe] = {
+                "machine": machine,
+                "recipe_path": path,
+                "src_uri": src_uri,
+                "src_rev": src_rev,
+                "src_branch": src_branch,
+                "tag": tag
+            }
+            logging.info(f"Successfully processed {recipe}")
+        else:
+            logging.warning(f"Incomplete source info for {recipe}: URI={src_uri}, REV={src_rev}, BRANCH={src_branch}")
+    
+    with open("final_output.json", "w") as f:
+        json.dump(package_info, f, indent=4)
+    
+if __name__ == "__main__":
+    main(), '', src_uri)  # Remove .git suffix
+                    logging.info(f"Found SRC_URI: {src_uri}")
+                    break
         elif "SRCREV" in line:
             match = re.search(r'SRCREV\s*=\s*"([^"]+)"', line)
             if match:
@@ -223,13 +444,27 @@ def main():
         print(f"Processing: {recipe}")
         machine = next((entry[0] for entry in buildlist_entries if entry[1] == recipe), None)
         
-        # Extract machine type from machine string (e.g., "2.0" from machine info)
+        # Extract machine type from machine string (e.g., "2.0" from "rcrip2-0")
         machine_type = None
         if machine:
-            # Extract version from machine string - adjust this regex based on your machine format
-            match = re.search(r'(\d+\.\d+)', machine)
-            if match:
-                machine_type = match.group(1)
+            # Try multiple patterns to extract version from machine string
+            patterns = [
+                r'(\d+\.\d+)',           # matches "2.0" in "2.0" 
+                r'rcrip(\d+)-(\d+)',     # matches "rcrip2-0" -> "2.0"
+                r'.*?(\d+)-(\d+)',       # matches any "X-Y" -> "X.Y"
+                r'.*?(\d+)\.(\d+)',      # matches any "X.Y"
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, machine)
+                if match:
+                    if len(match.groups()) == 2:
+                        machine_type = f"{match.group(1)}.{match.group(2)}"
+                    else:
+                        machine_type = match.group(1)
+                    break
+            
+            logging.info(f"Machine: {machine} -> Machine Type: {machine_type}")
         
         logging.info(f"Processing recipe: {recipe}, machine: {machine}, machine_type: {machine_type}")
         
