@@ -103,42 +103,42 @@ def find_recipes(yocto_layers_path, package_names):
                         logging.info(f"Recipe found (pattern match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
                         break
                 
-                # GENERIC: Handle directory-based matching (covers multiple patterns)
+                # ENHANCED: Handle directory-based matching (more robust)
                 directory_name = os.path.basename(root)
                 
-                # Debug: Log directory and file info for problematic packages
-                if 'geodata' in directory_name or 'bluetooth' in directory_name:
-                    logging.info(f"DEBUG: Checking directory '{directory_name}' with file '{file}'")
+                # Only try directory matching for unmatched packages
+                unmatched_packages = [pkg for pkg in package_names if pkg not in recipe_paths]
                 
-                for pkg in package_names:
-                    if pkg not in recipe_paths and len(directory_name) > 3:
-                        # Debug for specific packages
-                        if 'geodata' in pkg or 'bluetooth' in pkg:
-                            logging.info(f"DEBUG: Checking package '{pkg}' against directory '{directory_name}' and file '{file}'")
+                for pkg in unmatched_packages:
+                    if len(directory_name) > 2:  # Allow shorter directory names
+                        # Multiple matching strategies
+                        matches = [
+                            # Strategy 1: Package starts with directory (geodatatypes starts with geodata)
+                            pkg.startswith(directory_name),
+                            
+                            # Strategy 2: Package exactly matches directory  
+                            pkg == directory_name,
+                            
+                            # Strategy 3: Directory starts with package
+                            directory_name.startswith(pkg) and len(pkg) > 3,
+                            
+                            # Strategy 4: Package contains directory name
+                            directory_name in pkg,
+                            
+                            # Strategy 5: Both contain common significant part
+                            any(part in pkg for part in directory_name.split('-') if len(part) > 3),
+                            
+                            # Strategy 6: File name contains package name
+                            pkg in file.lower(),
+                        ]
                         
-                        # Pattern 1: Package starts with directory name (geodatatypes starts with geodata)
-                        pattern1_match = pkg.startswith(directory_name) and (pkg in original_recipe_name or pkg in file)
-                        
-                        # Pattern 2: Package exactly matches directory name (polaris-bluetooth-connd)
-                        pattern2_match = pkg == directory_name and (pkg in original_recipe_name or pkg in file)
-                        
-                        # Pattern 3: Directory contains package name (reverse of pattern 1)
-                        pattern3_match = directory_name.startswith(pkg) and (pkg in original_recipe_name or pkg in file)
-                        
-                        # Debug the pattern matching
-                        if 'geodata' in pkg or 'bluetooth' in pkg:
-                            logging.info(f"DEBUG: Pattern checks for {pkg}: pattern1={pattern1_match}, pattern2={pattern2_match}, pattern3={pattern3_match}")
-                            logging.info(f"DEBUG: pkg.startswith(directory_name)={pkg.startswith(directory_name)}, pkg==directory_name={pkg == directory_name}")
-                            logging.info(f"DEBUG: pkg in original_recipe_name={pkg in original_recipe_name}, pkg in file={pkg in file}")
-                        
-                        if pattern1_match or pattern2_match or pattern3_match:
+                        if any(matches):
                             recipes_found.append(pkg)
                             recipe_paths[pkg] = os.path.join(root, file)
                             if pkg in recipes_not_found:
                                 recipes_not_found.remove(pkg)
-                            match_type = "prefix" if pattern1_match else ("exact" if pattern2_match else "reverse")
-                            logging.info(f"Recipe found (directory-{match_type} match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
-                            break
+                            logging.info(f"Recipe found (directory match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
+                            break  # Move to next file once we find a match
     
     return recipes_found, recipes_not_found, recipe_paths
 
