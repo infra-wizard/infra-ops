@@ -100,18 +100,26 @@ def find_recipes(yocto_layers_path, package_names):
                         logging.info(f"Recipe found (pattern match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
                         break
                 
-                # GENERIC: Handle directory-based matching (like geodata case)  
-                # Check if package name contains the directory name as a prefix
+                # GENERIC: Handle directory-based matching (covers multiple patterns)
                 directory_name = os.path.basename(root)
                 for pkg in package_names:
                     if pkg not in recipe_paths and len(directory_name) > 3:
-                        # Check if package starts with directory name (geodatatypes starts with geodata)
-                        if pkg.startswith(directory_name) and (pkg in original_recipe_name or pkg in file):
+                        # Pattern 1: Package starts with directory name (geodatatypes starts with geodata)
+                        pattern1_match = pkg.startswith(directory_name) and (pkg in original_recipe_name or pkg in file)
+                        
+                        # Pattern 2: Package exactly matches directory name (polaris-bluetooth-connd)
+                        pattern2_match = pkg == directory_name and (pkg in original_recipe_name or pkg in file)
+                        
+                        # Pattern 3: Directory contains package name (reverse of pattern 1)
+                        pattern3_match = directory_name.startswith(pkg) and (pkg in original_recipe_name or pkg in file)
+                        
+                        if pattern1_match or pattern2_match or pattern3_match:
                             recipes_found.append(pkg)
                             recipe_paths[pkg] = os.path.join(root, file)
                             if pkg in recipes_not_found:
                                 recipes_not_found.remove(pkg)
-                            logging.info(f"Recipe found (directory-based match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
+                            match_type = "prefix" if pattern1_match else ("exact" if pattern2_match else "reverse")
+                            logging.info(f"Recipe found (directory-{match_type} match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
                             break
     
     return recipes_found, recipes_not_found, recipe_paths
