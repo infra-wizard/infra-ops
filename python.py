@@ -197,20 +197,30 @@ def clone_and_describe_repo(src_uri, src_branch, src_rev):
             return None
 
 def main():
+    print("Starting package version finder script...")
     parser = argparse.ArgumentParser(description="Read and parse pn-buildlist file.")
     parser.add_argument("--buildlist-path", required=True, help="Path to the pn-buildlist file")
     parser.add_argument("--yocto-layers-path", required=True, help="Path to the Yocto source layers (BitBake recipes)")
     
     args = parser.parse_args()
+    print(f"Arguments parsed - buildlist: {args.buildlist_path}, yocto: {args.yocto_layers_path}")
     
     validate_path(args.buildlist_path, "pn-buildlist path")
     validate_path(args.yocto_layers_path, "Yocto source layers path")
     
+    print("Reading buildlist...")
     buildlist_entries, package_names = read_buildlist(args.buildlist_path)
+    print(f"Found {len(package_names)} packages in buildlist")
+    
+    print("Finding recipes...")
     recipes_found, recipes_not_found, recipe_paths = find_recipes(args.yocto_layers_path, package_names)
+    print(f"Found {len(recipes_found)} recipes, missing {len(recipes_not_found)} recipes")
     
     package_info = {}
+    print(f"Processing {len(recipe_paths)} recipes...")
+    
     for recipe, path in recipe_paths.items():
+        print(f"Processing: {recipe}")
         machine = next((entry[0] for entry in buildlist_entries if entry[1] == recipe), None)
         
         # Extract machine type from machine string (e.g., "2.0" from machine info)
@@ -242,5 +252,5 @@ def main():
     with open("final_output.json", "w") as f:
         json.dump(package_info, f, indent=4)
     
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
