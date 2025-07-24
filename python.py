@@ -59,6 +59,16 @@ def find_recipes(yocto_layers_path, package_names):
             if file.endswith((".bb", ".inc")):
                 recipe_name = os.path.splitext(file)[0]
                 
+                # Handle different recipe naming patterns
+                original_recipe_name = recipe_name
+                
+                # Remove common suffixes that might be added to recipe files
+                suffixes_to_remove = ['_git', '_svn', '_hg', '-git', '-svn', '-hg']
+                for suffix in suffixes_to_remove:
+                    if recipe_name.endswith(suffix):
+                        recipe_name = recipe_name[:-len(suffix)]
+                        break
+                
                 # If the recipe is named "common", try to match it to a package name in the path
                 if recipe_name == "common":
                     for pkg in package_names:
@@ -66,12 +76,29 @@ def find_recipes(yocto_layers_path, package_names):
                             recipe_name = pkg
                             break
                 
+                # Check if this recipe matches any package name
                 if recipe_name in package_names:
                     recipes_found.append(recipe_name)
                     recipe_paths[recipe_name] = os.path.join(root, file)
                     if recipe_name in recipes_not_found:
                         recipes_not_found.remove(recipe_name)
-                    logging.info(f"Recipe found: {recipe_name} at {os.path.join(root, file)}")
+                    logging.info(f"Recipe found: {recipe_name} -> {original_recipe_name} at {os.path.join(root, file)}")
+                
+                # Also check if the package name is a substring of the recipe name
+                # This handles cases like polaris-vdm-client-test.bb matching polaris-vdm-client
+                for pkg in package_names:
+                    if pkg not in recipe_paths and (
+                        recipe_name.startswith(pkg + '-') or 
+                        recipe_name.startswith(pkg + '_') or
+                        original_recipe_name.startswith(pkg + '-') or
+                        original_recipe_name.startswith(pkg + '_')
+                    ):
+                        recipes_found.append(pkg)
+                        recipe_paths[pkg] = os.path.join(root, file)
+                        if pkg in recipes_not_found:
+                            recipes_not_found.remove(pkg)
+                        logging.info(f"Recipe found (pattern match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
+                        break
     
     return recipes_found, recipes_not_found, recipe_paths
 
