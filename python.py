@@ -292,16 +292,25 @@ def extract_src_info(recipe_path, machine_type):
 def clone_and_describe_repo(src_uri, src_branch, src_rev):
     with tempfile.TemporaryDirectory() as repo_dir:
         try:
-            # Construct proper git URL
-            if not src_uri.startswith(('http://', 'https://', 'git://', 'gitsm://')):
-                if 'github.com' in src_uri:
-                    git_url = f"https://{src_uri}"
+            # Convert to SSH format for cloning
+            if 'github.com' in src_uri:
+                # Convert github.com/user/repo to git@github.com:user/repo.git
+                if src_uri.startswith('github.com/'):
+                    git_url = f"git@{src_uri.replace('/', ':', 1)}.git"
+                elif 'github.com/' in src_uri:
+                    # Handle cases like "something/github.com/user/repo"
+                    github_part = src_uri[src_uri.find('github.com/'):]
+                    git_url = f"git@{github_part.replace('/', ':', 1)}.git"
                 else:
-                    git_url = f"git://{src_uri}"
+                    git_url = f"git@github.com:{src_uri}.git"
             else:
-                git_url = src_uri
+                # For non-GitHub repos, try to construct SSH URL
+                if not src_uri.startswith(('git@', 'ssh://')):
+                    git_url = f"git@{src_uri}"
+                else:
+                    git_url = src_uri
             
-            logging.info(f"Attempting to clone: {git_url}")
+            logging.info(f"Attempting to clone via SSH: {git_url}")
             
             # Try cloning with the branch
             result = subprocess.run(
@@ -334,7 +343,7 @@ def clone_and_describe_repo(src_uri, src_branch, src_rev):
             return tag
             
         except subprocess.CalledProcessError as e:
-            logging.error(f"Git operation failed for {src_uri}: {e}")
+            logging.error(f"Git operation failed for {git_url}: {e}")
             logging.error(f"stderr: {e.stderr if hasattr(e, 'stderr') else 'No stderr'}")
             # Return a fallback tag based on the revision
             return f"rev-{src_rev[:8]}" if src_rev else None
