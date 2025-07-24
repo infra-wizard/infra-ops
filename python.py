@@ -123,9 +123,22 @@ def extract_src_info(recipe_path, machine_type):
                 match = re.search(pattern, line)
                 if match:
                     src_uri = match.group(1)
-                    # Clean up the URI - standardize format
+                    
+                    # Clean up and standardize the URI format
                     if src_uri.endswith('.git'):
                         src_uri = src_uri[:-4]  # Remove .git suffix
+                    
+                    # Convert to git@ format for consistency
+                    if 'github.com' in src_uri:
+                        if src_uri.startswith('github.com/'):
+                            src_uri = f"git@{src_uri.replace('/', ':', 1)}.git"
+                        elif 'github.com/' in src_uri:
+                            # Handle cases like "something/github.com/user/repo"
+                            github_part = src_uri[src_uri.find('github.com/'):]
+                            src_uri = f"git@{github_part.replace('/', ':', 1)}.git"
+                        else:
+                            src_uri = f"git@github.com:{src_uri}.git"
+                    
                     logging.info(f"  ✓ MATCHED! SRC_URI: {src_uri} (from pattern: {pattern_name})")
                     break
                 else:
@@ -180,11 +193,14 @@ def extract_src_info(recipe_path, machine_type):
         
         logging.info(f"Searching for missing info - base_name: {base_name}, machine_type: {machine_type}")
         
-        # Look for machine-specific files
+        # Look for machine-specific files with enhanced patterns for geodata
         possible_patterns = [
-            f"{base_name}_{machine_type}.bb",
-            f"{base_name}-{machine_type}.bb",
-            f"{base_name}.{machine_type}.bb"
+            f"{base_name}_{machine_type}.bb",      # janus_2.0.bb
+            f"{base_name}-{machine_type}.bb",      # janus-2.0.bb  
+            f"{base_name}.{machine_type}.bb",      # janus.2.0.bb
+            f"common_{machine_type}.inc",          # geodata: common_2.0.inc
+            f"common_{machine_type}.bb",           # geodata: common_2.0.bb
+            f"{base_name}_{machine_type}.inc",     # base_2.0.inc
         ]
         
         for pattern in possible_patterns:
@@ -292,23 +308,8 @@ def extract_src_info(recipe_path, machine_type):
 def clone_and_describe_repo(src_uri, src_branch, src_rev):
     with tempfile.TemporaryDirectory() as repo_dir:
         try:
-            # Convert to SSH format for cloning
-            if 'github.com' in src_uri:
-                # Convert github.com/user/repo to git@github.com:user/repo.git
-                if src_uri.startswith('github.com/'):
-                    git_url = f"git@{src_uri.replace('/', ':', 1)}.git"
-                elif 'github.com/' in src_uri:
-                    # Handle cases like "something/github.com/user/repo"
-                    github_part = src_uri[src_uri.find('github.com/'):]
-                    git_url = f"git@{github_part.replace('/', ':', 1)}.git"
-                else:
-                    git_url = f"git@github.com:{src_uri}.git"
-            else:
-                # For non-GitHub repos, try to construct SSH URL
-                if not src_uri.startswith(('git@', 'ssh://')):
-                    git_url = f"git@{src_uri}"
-                else:
-                    git_url = src_uri
+            # Use the URI as-is since it's already in git@ format from extract_src_info
+            git_url = src_uri
             
             logging.info(f"Attempting to clone via SSH: {git_url}")
             
