@@ -54,6 +54,9 @@ def find_recipes(yocto_layers_path, package_names):
     recipes_not_found = package_names.copy()
     recipe_paths = {}
     
+    # Debug: log which packages we're looking for
+    logging.info(f"Looking for these packages: {package_names}")
+    
     for root, dirs, files in os.walk(yocto_layers_path):
         for file in files:
             if file.endswith((".bb", ".inc")):
@@ -102,8 +105,17 @@ def find_recipes(yocto_layers_path, package_names):
                 
                 # GENERIC: Handle directory-based matching (covers multiple patterns)
                 directory_name = os.path.basename(root)
+                
+                # Debug: Log directory and file info for problematic packages
+                if 'geodata' in directory_name or 'bluetooth' in directory_name:
+                    logging.info(f"DEBUG: Checking directory '{directory_name}' with file '{file}'")
+                
                 for pkg in package_names:
                     if pkg not in recipe_paths and len(directory_name) > 3:
+                        # Debug for specific packages
+                        if 'geodata' in pkg or 'bluetooth' in pkg:
+                            logging.info(f"DEBUG: Checking package '{pkg}' against directory '{directory_name}' and file '{file}'")
+                        
                         # Pattern 1: Package starts with directory name (geodatatypes starts with geodata)
                         pattern1_match = pkg.startswith(directory_name) and (pkg in original_recipe_name or pkg in file)
                         
@@ -112,6 +124,12 @@ def find_recipes(yocto_layers_path, package_names):
                         
                         # Pattern 3: Directory contains package name (reverse of pattern 1)
                         pattern3_match = directory_name.startswith(pkg) and (pkg in original_recipe_name or pkg in file)
+                        
+                        # Debug the pattern matching
+                        if 'geodata' in pkg or 'bluetooth' in pkg:
+                            logging.info(f"DEBUG: Pattern checks for {pkg}: pattern1={pattern1_match}, pattern2={pattern2_match}, pattern3={pattern3_match}")
+                            logging.info(f"DEBUG: pkg.startswith(directory_name)={pkg.startswith(directory_name)}, pkg==directory_name={pkg == directory_name}")
+                            logging.info(f"DEBUG: pkg in original_recipe_name={pkg in original_recipe_name}, pkg in file={pkg in file}")
                         
                         if pattern1_match or pattern2_match or pattern3_match:
                             recipes_found.append(pkg)
