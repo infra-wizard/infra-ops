@@ -61,83 +61,60 @@ def find_recipes(yocto_layers_path, package_names):
         for file in files:
             if file.endswith((".bb", ".inc")):
                 recipe_name = os.path.splitext(file)[0]
-                
-                # Debug: log files in polaris-vdm directories
-                if 'polaris-vdm' in root:
-                    logging.info(f"Found file in polaris-vdm directory: {file} in {root}")
-                
-                # Handle different recipe naming patterns
                 original_recipe_name = recipe_name
+                directory_name = os.path.basename(root)
                 
-                # Remove common suffixes that might be added to recipe files
+                # Remove common suffixes (make this more permissive)
                 suffixes_to_remove = ['_git', '_svn', '_hg', '-git', '-svn', '-hg', '-test', '-dev', '-cfg', '-prod']
+                clean_recipe_name = recipe_name
                 for suffix in suffixes_to_remove:
-                    if recipe_name.endswith(suffix):
-                        recipe_name = recipe_name[:-len(suffix)]
+                    if clean_recipe_name.endswith(suffix):
+                        clean_recipe_name = clean_recipe_name[:-len(suffix)]
                         break
                 
-                # If the recipe is named "common", try to match it to a package name in the path
-                if recipe_name == "common":
+                # Handle "common" files - map to directory name
+                if clean_recipe_name == "common":
                     for pkg in package_names:
                         if pkg in root:
-                            recipe_name = pkg
+                            clean_recipe_name = pkg
                             break
                 
-                # Check if this recipe matches any package name exactly
-                if recipe_name in package_names:
-                    if recipe_name not in recipe_paths:  # Only add if not already found
-                        recipes_found.append(recipe_name)
-                        recipe_paths[recipe_name] = os.path.join(root, file)
-                        if recipe_name in recipes_not_found:
-                            recipes_not_found.remove(recipe_name)
-                        logging.info(f"Recipe found (exact match): {recipe_name} -> {original_recipe_name} at {os.path.join(root, file)}")
-                
-                # Also check directory-based matching for cases like geodata
-                # where packages are geodatatypes/geodataservice but files are in geodata/ directory
-                directory_name = os.path.basename(root)
+                # Try to match each package with current file
                 for pkg in package_names:
-                    if pkg not in recipe_paths:
-                        # Check if package name contains directory name or vice versa
-                        pkg_parts = pkg.split('-')
-                        dir_parts = directory_name.split('-') 
+                    if pkg in recipe_paths:  # Skip if already found
+                        continue
                         
-                        matches = [
-                            recipe_name == pkg,
-                            original_recipe_name == pkg,
-                            recipe_name.startswith(pkg + '-'),
-                            recipe_name.startswith(pkg + '_'),
-                            original_recipe_name.startswith(pkg + '-'),
-                            original_recipe_name.startswith(pkg + '_'),
-                            # Directory name matches part of package name
-                            directory_name in pkg,
-                            pkg.startswith(directory_name),
-                            # Check if directory name is a prefix of package name
-                            any(part.startswith(directory_name) for part in pkg_parts if len(directory_name) > 3),
-                            # Check if recipe base name matches package prefix (for geodata case)
-                            any(pkg.startswith(part) for part in [recipe_name, original_recipe_name] if len(part) > 3)
-                        ]
+                    # Multiple matching strategies (in order of preference)
+                    matches = [
+                        # Exact matches
+                        clean_recipe_name == pkg,
+                        original_recipe_name == pkg,
                         
-                        if any(matches):
-                            recipes_found.append(pkg)
-                            recipe_paths[pkg] = os.path.join(root, file)
-                            if pkg in recipes_not_found:
-                                recipes_not_found.remove(pkg)
-                            logging.info(f"Recipe found (directory/pattern match): {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
-                            break
-    
-    # Debug: specifically check for the missing packages
-    missing_packages = ['polaris-vdm-client', 'polaris-vdm-engine']
-    for pkg in missing_packages:
-        if pkg in recipes_not_found:
-            logging.warning(f"Package {pkg} not found. Searching for any files containing '{pkg}'...")
-            # Search more broadly
-            for root, dirs, files in os.walk(yocto_layers_path):
-                if pkg.replace('-', '') in root or pkg in root:
-                    logging.info(f"Directory containing {pkg}: {root}")
-                    logging.info(f"Files in directory: {files}")
-                for file in files:
-                    if pkg.replace('-', '') in file or any(part in file for part in pkg.split('-')):
-                        logging.info(f"Potential match file: {file} in {root}")
+                        # Prefix matches (for files like polaris-video_git.bb)
+                        clean_recipe_name.startswith(pkg + '-'),
+                        clean_recipe_name.startswith(pkg + '_'),
+                        original_recipe_name.startswith(pkg + '-'),
+                        original_recipe_name.startswith(pkg + '_'),
+                        
+                        # Directory-based matches (for geodata case)
+                        directory_name in pkg and len(directory_name) > 3,
+                        pkg.startswith(directory_name) and len(directory_name) > 3,
+                        
+                        # File contains package parts (more flexible)
+                        pkg in clean_recipe_name,
+                        pkg in original_recipe_name,
+                        
+                        # Package parts match (for complex names)
+                        any(part in clean_recipe_name for part in pkg.split('-') if len(part) > 2),
+                    ]
+                    
+                    if any(matches):
+                        recipes_found.append(pkg)
+                        recipe_paths[pkg] = os.path.join(root, file)
+                        if pkg in recipes_not_found:
+                            recipes_not_found.remove(pkg)
+                        logging.info(f"Recipe found: {pkg} -> {original_recipe_name} at {os.path.join(root, file)}")
+                        break  # Move to next file once we find a match
     
     return recipes_found, recipes_not_found, recipe_paths
 
