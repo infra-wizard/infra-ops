@@ -24,3 +24,6 @@ requirements.txt
 kubernetes==28.1.0
 Flask==2.0.3
 Werkzeug==2.0.3
+
+
+echo "<YOUR_GITHUB_PAT>" | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
