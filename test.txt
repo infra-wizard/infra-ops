@@ -94,6 +94,10 @@ jobs:
 
     - name: Configure Toolchain PATH
       run: |
+        echo "=== Installing Compilers ==="
+        sudo apt-get update
+        sudo apt-get install -y git gcc g++ make cmake
+
         echo "=== Configuring ARM Toolchain PATH ==="
         
         # Add ARM toolchain to PATH
