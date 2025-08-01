@@ -116,6 +116,22 @@ jobs:
         # Show compiler version
         arm-none-eabi-gcc --version | head -3
         arm-none-eabi-g++ --version | head -1
+
+    - name: Clone Main Repository to Subdirectory
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: src/main-project  # Clones to ./src/main-project/
+        fetch-depth: 0
+    
+    # OPTION 2: Clone multiple repositories to different subdirectories
+    - name: Clone Dependencies to Subdirectories
+      uses: actions/checkout@v4
+      with:
+        repository: your-org/shared-library
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: deps/shared-lib  # Clones to ./deps/shared-lib/
+        ref: main
     
     - name: Upload Bridge CLI Logs
       uses: actions/upload-artifact@v4
