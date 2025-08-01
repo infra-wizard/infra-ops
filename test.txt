@@ -1,29 +1,102 @@
-ubuntu:latest
+name: Polaris SAST Scan with Bridge CLI
 
-apt-get install -y python3 python3-pip curl wget ca-certificates
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
 
-echo "📦 Installing Trivy from GitHub..."
-          TRIVY_VERSION="0.63.0"
-          wget -q "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" -O /tmp/trivy.tar.gz
-          cd /tmp
-          tar zxf trivy.tar.gz
-          mv trivy /usr/local/bin/
-          chmod +x /usr/local/bin/trivy
-          rm /tmp/trivy.tar.gz
-          echo "✅ Trivy installed successfully"
-
-trivy --version
-
-pip install --no-cache-dir --break-system-packages -r requirements.txt
-
-python3 /tmp/app/scanner.py
-
-curl -sL https://aka.ms/InstallAzureCLIDeb | bash
-
-requirements.txt
-kubernetes==28.1.0
-Flask==2.0.3
-Werkzeug==2.0.3
-
-
-echo "<YOUR_GITHUB_PAT>" | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
+jobs:
+  polaris-scan:
+    runs-on: ubuntu-latest
+    
+    container:
+      image: your-registry/coverity-ubuntu:latest
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Create Coverity Configuration for Bridge CLI
+      run: |
+        # Create coverity.yaml for Bridge CLI + Polaris
+        cat > coverity.yaml << 'EOF'
+        # Coverity configuration file for Bridge CLI
+        # Schema: <install-dir>/doc/configuration-schema.json
+        capture:
+          build:
+            clean-command: "make clean"
+            build-command: "make -j $(nproc)"
+            
+          # Language configuration (optional)
+          languages:
+            include:
+              - c-family
+              - java
+            # exclude:
+            #   - python
+            
+          # Encoding for source files
+          encoding: "UTF-8"
+            
+        # Compiler configuration for C/C++ projects
+        compiler-configuration:
+          cov-configure:
+            # Standard GCC compilers
+            - [ --template, --compiler, gcc, --comptype, gcc ]
+            - [ --template, --compiler, g++, --comptype, g++ ]
+            
+            # Cross-compilers (if needed)
+            - [ --template, --compiler, arm-linux-gnueabi-gcc, --comptype, gcc ]
+            - [ --template, --compiler, arm-linux-gnueabi-g++, --comptype, g++ ]
+            
+            # Specific GCC versions
+            - [ --template, --compiler, gcc-11, --comptype, gcc ]
+            - [ --template, --compiler, g++-11, --comptype, g++ ]
+            
+            # Custom compiler with flags
+            - [ --template, --compiler, gcc, --comptype, gcc, --, -std=c++17, -Wall ]
+        EOF
+        
+        echo "=== Created coverity.yaml for Bridge CLI ==="
+        cat coverity.yaml
+    
+    - name: Download Bridge CLI
+      run: |
+        # Download Bridge CLI from Black Duck repository
+        curl -fLsS -o bridge.zip https://repo.blackduck.com/bds-integrations-release/com/blackduck/integration/bridge-cli/latest/bridge-cli-linux64.zip
+        
+        unzip bridge.zip
+        chmod +x bridge-cli-linux64
+        
+        # Verify Bridge CLI
+        ./bridge-cli-linux64 --version
+    
+    - name: Run Polaris SAST Scan
+      env:
+        POLARIS_SERVER_URL: ${{ secrets.POLARIS_SERVER_URL }}
+        POLARIS_ACCESS_TOKEN: ${{ secrets.POLARIS_ACCESS_TOKEN }}
+        BRIDGE_POLARIS_PROJECT_NAME: ${{ github.repository }}
+        BRIDGE_POLARIS_BRANCH_NAME: ${{ github.ref_name }}
+      run: |
+        # Run Bridge CLI with Polaris
+        ./bridge-cli-linux64 \
+          --stage polaris \
+          --verbose \
+          --diagnostics \
+          --polaris.project.name="$BRIDGE_POLARIS_PROJECT_NAME" \
+          --polaris.branch.name="$BRIDGE_POLARIS_BRANCH_NAME"
+        
+        # Bridge CLI automatically:
+        # 1. Detects coverity.yaml in project root
+        # 2. Calls Coverity Thin Client with your compiler config
+        # 3. Uploads results to Polaris
+    
+    - name: Upload Bridge CLI Logs
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: bridge-cli-logs
+        path: |
+          .bridge/
+          **/*.log
