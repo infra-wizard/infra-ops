@@ -91,6 +91,27 @@ jobs:
         # 1. Detects coverity.yaml in project root
         # 2. Calls Coverity Thin Client with your compiler config
         # 3. Uploads results to Polaris
+
+    - name: Configure Toolchain PATH
+      run: |
+        echo "=== Configuring ARM Toolchain PATH ==="
+        
+        # Add ARM toolchain to PATH
+        export ARM_TOOLCHAIN_PATH="/opt/arm-gnu-toolchain/bin"
+        export PATH="$ARM_TOOLCHAIN_PATH:$PATH"
+        
+        # Make PATH persistent for subsequent steps
+        echo "ARM_TOOLCHAIN_PATH=/opt/arm-gnu-toolchain/bin" >> $GITHUB_ENV
+        echo "PATH=$ARM_TOOLCHAIN_PATH:$PATH" >> $GITHUB_ENV
+        
+        # Verify ARM compiler installation
+        echo "=== Verifying ARM Compilers ==="
+        which arm-none-eabi-gcc
+        which arm-none-eabi-g++
+        
+        # Show compiler version
+        arm-none-eabi-gcc --version | head -3
+        arm-none-eabi-g++ --version | head -1
     
     - name: Upload Bridge CLI Logs
       uses: actions/upload-artifact@v4
