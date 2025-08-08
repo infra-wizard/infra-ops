@@ -1,5 +1,18 @@
-# Set environment variable for the executable location
-    echo "VEHICLE_ARM_EXEC=$(pwd)/vehicle-arm0-version" >> $GITHUB_ENV
-    
-    # Add current directory to PATH
-    echo "$(pwd)" >> $GITHUB_PATH
+# polaris.yml
+version: "1"
+
+project:
+  name: "vip-rcip"
+  branch: "main"  # or your current branch
+
+capture:
+  coverity:
+    buildCommands:
+      - "cd vip/build"
+      - "./build-debug.sh"
+      - "make"
+    cleanCommands:
+      - "cd vip/build"
+      - "make clean || echo 'Clean completed'"
+
+serverUrl: "https://polaris.blackduck.com"
