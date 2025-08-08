@@ -1,9 +1,8 @@
-# polaris.yml
 version: "1"
 
 project:
   name: "vip-rcip"
-  branch: "main"  # or your current branch
+  branch: "main"  # Change to your current branch name
 
 capture:
   coverity:
