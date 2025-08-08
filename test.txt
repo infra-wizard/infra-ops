@@ -1,17 +1,12 @@
-version: "1"
-
-project:
-  name: "vip-rcip"
-  branch: "main"  # Change to your current branch name
+# Coverity configuration file for Polaris
+# Based on BlackDuck documentation: https://documentation.blackduck.com/bundle/polaris-developer/page/documentation/t_cov-thin-client.html
 
 capture:
-  coverity:
-    buildCommands:
-      - "cd vip/build"
-      - "./build-debug.sh"
-      - "make"
-    cleanCommands:
-      - "cd vip/build"
-      - "make clean || echo 'Clean completed'"
-
-serverUrl: "https://polaris.blackduck.com"
+  build:
+    clean-command: "cd vip/build && make clean"
+    build-command: "cd vip/build && ./build-debug.sh && make"
+  compiler-configuration:
+    cov-configure:
+      - [ --template, --compiler, arm-none-eabi-gcc, --comptype, gcc, --version, "13.3.1" ]
+      - [ --template, --compiler, arm-none-eabi-g++, --comptype, g++, --version, "13.3.1" ]
+      - [ --template, --compiler, arm-none-eabi-ar, --comptype, ar ]
