@@ -1,13 +1,4 @@
 # Initialize and update the crashpad submodule
 git submodule update --init --recursive ps-crashpad-lib/crashpad
+sudo apt install libcurl4-openssl-dev
 
-# If that doesn't work, try forcing it
-git submodule update --init --recursive --force ps-crashpad-lib/crashpad
-
-# Remove the empty crashpad directory
-rm -rf ps-crashpad-lib/crashpad
-
-# Reinitialize the submodule
-git submodule deinit ps-crashpad-lib/crashpad
-git submodule init ps-crashpad-lib/crashpad
-git submodule update ps-crashpad-lib/crashpad
