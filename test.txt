@@ -1,15 +1,1 @@
-# BRIDGE_POLARIS_PROJECT_NAME: "${{ github.event.repository.name }}"  # "vip-rcip"
-# BRIDGE_POLARIS_BRANCH_NAME: "${{ github.ref_name }}" 
-# BRIDGE_POLARIS_TEST_SAST_TYPE="SAST-RAPID"
-# Coverity configuration file for Polaris
-# Based on BlackDuck documentation: https://documentation.blackduck.com/bundle/polaris-developer/page/documentation/t_cov-thin-client.html
-
-capture:
-  build:
-    clean-command: "cd vip/build && make clean"
-    build-command: "cd vip/build && ./build-debug.sh && make"
-  compiler-configuration:
-    cov-configure:
-      - [ --template, --compiler, arm-none-eabi-gcc, --comptype, gcc, --version, "13.3.1" ]
-      - [ --template, --compiler, arm-none-eabi-g++, --comptype, g++, --version, "13.3.1" ]
-      - [ --template, --compiler, arm-none-eabi-ar, --comptype, ar ]
+sudo apt install libdbus-1-dev libdbus-glib-1-dev qtbase5-dev qtbase5-private-dev
