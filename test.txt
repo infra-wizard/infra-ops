@@ -2,3 +2,25 @@
 git submodule update --init --recursive ps-crashpad-lib/crashpad
 sudo apt install libcurl4-openssl-dev
 
+
+
+find . -name "*systeminfo*" -type f
+find . -name "*sysinfo*" -type f
+
+# Check if there's a systeminfo directory or CMakeLists.txt
+ls -la | grep -i system
+
+
+# Look for systeminfo in CMake files
+grep -r "systeminfo" . --include="*.txt" --include="*.cmake"
+
+# Check what libraries vtp-util expects
+cat vtp-util/CMakeLists.txt | grep -A 5 -B 5 systeminfo
+
+
+# Check the main CMakeLists.txt for build order
+cat CMakeLists.txt | grep add_subdirectory | head -20
+
+# See what targets are available
+cd build
+make help | grep -i info
