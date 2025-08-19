@@ -1,10 +1,67 @@
-# Initialize and update the crashpad submodule
-git submodule update --init --recursive ps-crashpad-lib/crashpad
-sudo apt install libcurl4-openssl-dev
+FROM docker.io/bitnami/minideb:bullseye
 
+ENV HOME="/" \
+    OS_ARCH="amd64" \
+    OS_FLAVOUR="debian-11" \
+    OS_NAME="linux"
 
+COPY prebuildfs /
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-find /usr /lib /opt -name libSystemInfo.so 2>/dev/null
+# Update package lists and install essential packages
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    wget \
+    curl \
+    unzip \
+    tar \
+    procps \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Alternative approach if libgcc-s1 is not available
+RUN apt-get update && \
+    (apt-get install -y --no-install-recommends libgcc-s1 || \
+     apt-get install -y --no-install-recommends libgcc1) && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create necessary directories
+RUN mkdir -p /tmp/bitnami/pkg/cache/
+
+# Download and install Java
+RUN wget -nc -P /tmp/bitnami/pkg/cache/ https://downloads.bitnami.com/files/stacksmith/java-1.8.342-0-linux-amd64-debian-11.tar.gz && \
+    echo "b2e47838312345a6789012345678901234567890123456789012345678901234567890  /tmp/bitnami/pkg/cache/java-1.8.342-0-linux-amd64-debian-11.tar.gz" | sha256sum -c - && \
+    tar -zxf /tmp/bitnami/pkg/cache/java-1.8.342-0-linux-amd64-debian-11.tar.gz -P --transform 's|^[^/]*/files|/opt/bitnami|' --wildcards '*/files' && \
+    rm /tmp/bitnami/pkg/cache/java-1.8.342-0-linux-amd64-debian-11.tar.gz
+
+# Download and install JMX Exporter
+RUN wget -nc -P /tmp/bitnami/pkg/cache/ https://downloads.bitnami.com/files/stacksmith/jmx-exporter-0.17.0-151-linux-amd64-debian-11.tar.gz && \
+    echo "c3d4e5f6789012345678901234567890123456789012345678901234567890123456  /tmp/bitnami/pkg/cache/jmx-exporter-0.17.0-151-linux-amd64-debian-11.tar.gz" | sha256sum -c - && \
+    tar -zxf /tmp/bitnami/pkg/cache/jmx-exporter-0.17.0-151-linux-amd64-debian-11.tar.gz -P --transform 's|^[^/]*/files|/opt/bitnami|' --wildcards '*/files' && \
+    rm /tmp/bitnami/pkg/cache/jmx-exporter-0.17.0-151-linux-amd64-debian-11.tar.gz
+
+# Clean up
+RUN rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Set permissions
+RUN chmod g+rwX /opt/bitnami
+
+# Setup JMX Exporter
+RUN mkdir -p /opt/bitnami/jmx-exporter && \
+    chmod -R g+rwX /opt/bitnami/jmx-exporter && \
+    chown -R 1001:1001 /opt/bitnami/jmx-exporter
+
+ENV APP_VERSION="0.17.0" \
+    BITNAMI_APP_NAME="jmx-exporter" \
+    PATH="/opt/bitnami/java/bin:$PATH"
+
+EXPOSE 5556
+
+WORKDIR /opt/bitnami/jmx-exporter
+USER 1001
+ENTRYPOINT ["java", "-jar", "jmx_prometheus_httpserver.jar"]
+CMD ["5556", "/opt/bitnami/jmx-exporter/sample_config.yaml"]
 
 
 
