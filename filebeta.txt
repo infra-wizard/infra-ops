@@ -1,1 +1,4 @@
 make VERBOSE=1 2>&1 | grep -A5 -B5 "lGPS"
+
+find /usr -name "libgps.so*" 2>/dev/null
+
