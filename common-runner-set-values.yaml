@@ -1,0 +1,4 @@
+githubConfigSecret:
+  github_token: ""
+githubConfigUrl: "https://github.com/"
+runnerScaleSetName: "edw-runner-set"
