@@ -1,17 +1,18 @@
-helm repo add elastic https://helm.elastic.co
-helm repo update
-
-helm pull elastic/elasticsearch --version 8.13.4 --untar
+git reset --soft HEAD~1  # Undo the last commit but keep changes staged
 
 
-cat elasticsearch-values.yaml
+git lfs track "*.zip"
+git lfs track "*.lib" 
+git lfs track "*.7z"
+git lfs track "*.dll"
+git lfs track "*.exe"
 
-resources:
-  requests:
-    cpu: "300m"
-    memory: "2Gi"
-  limits:
-    cpu: "500m"
-    memory: "4Gi"
+git lfs migrate import --include="*.zip,*.lib,*.7z,*.dll,*.exe" --everything
 
-helm install elasticsearch elastic/elasticsearch -f elasticsearch-values.yaml
+
+git add .gitattributes
+git commit -m "Add Git LFS tracking"
+git add .
+git commit -m "Add large files via Git LFS"
+
+git push --force-with-lease origin main
