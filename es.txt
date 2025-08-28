@@ -1,18 +1,23 @@
-git reset --soft HEAD~1  # Undo the last commit but keep changes staged
+# 👇 argument parsing block goes right after the function
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --deploy)
+      deploy
+      shift
+      ;;
+    --regcode)
+      export REGCODE="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
 
-
-git lfs track "*.zip"
-git lfs track "*.lib" 
-git lfs track "*.7z"
-git lfs track "*.dll"
-git lfs track "*.exe"
-
-git lfs migrate import --include="*.zip,*.lib,*.7z,*.dll,*.exe" --everything
-
-
-git add .gitattributes
-git commit -m "Add Git LFS tracking"
-git add .
-git commit -m "Add large files via Git LFS"
-
-git push --force-with-lease origin main
+# 👇 now you can use REGCODE safely
+if [ -z "$REGCODE" ]; then
+  echo "Error: --regcode is required"
+  exit 1
+fi
