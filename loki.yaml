@@ -1,6 +1,10 @@
 # AKS-Optimized Loki Configuration
 # This configuration is designed for Azure Kubernetes Service deployment
 
+# DefaultEndpointsProtocol=https;AccountName=storagesample;AccountKey=<account-key>
+
+
+
 loki:
   storage:
     type: azure
