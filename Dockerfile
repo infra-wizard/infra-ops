@@ -1,54 +1,40 @@
-FROM ubuntu:22.04
+FROM debian:buster
 
-# Set build arguments for user configuration
-ARG COVERITY_UID=1001
-ARG COVERITY_GID=121
-ARG COVERITY_USER=runner
+RUN echo "deb http://archive.debian.org/debian buster main" > /etc/apt/sources.list && \
 
-# Avoid interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
+    echo "deb http://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list && \
 
-# Update package list and install essential packages for GitHub Actions
-RUN apt-get update && apt-get install -y \
-    sudo \
-    curl \
-    wget \
-    git \
-    vim \
-    unzip \
-    tar \
-    build-essential \
-    software-properties-common \
-    apt-transport-https \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    python3 \
-    python3-pip \
-    jq \
-    && rm -rf /var/lib/apt/lists/*
+    echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99no-check-valid-until
 
-# Create runner group if it doesn't exist (GitHub Actions compatible)
-RUN groupadd -g ${COVERITY_GID} ${COVERITY_USER} || true
+RUN apt update && \
 
-# Create runner user with sudo privileges (GitHub Actions compatible)
-RUN useradd -m -u ${COVERITY_UID} -g ${COVERITY_GID} -s /bin/bash ${COVERITY_USER} && \
-    echo "${COVERITY_USER} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
-    usermod -aG sudo ${COVERITY_USER}
+    apt upgrade -y && \
 
-# Create common directories that runner user might need
-RUN mkdir -p /opt/coverity /var/log/coverity /tmp/coverity /github/workspace && \
-    chown -R ${COVERITY_USER}:${COVERITY_USER} /opt/coverity /var/log/coverity /tmp/coverity /github/workspace
+    apt install -y openssl libssl1.1 ca-certificates curl
 
-# Set working directory to GitHub Actions workspace
-WORKDIR /github/workspace
+RUN echo "=== Packages depending on libdb5.3 ===" && \
 
-# Switch to coverity user
-USER ${COVERITY_USER}
+    apt-cache rdepends libdb5.3 || true
 
-# Set environment variables
-ENV USER=${COVERITY_USER}
-ENV HOME=/home/${COVERITY_USER}
+RUN apt remove --purge -y libdb5.3 libdb5.3-dev libdb5.3-java libdb5.3-java-jni libdb5.3++ libdb5.3++-dev || true
 
-# Default command
-CMD ["/bin/bash"]
+RUN dpkg --remove --force-depends libdb5.3 || true
+
+
+RUN apt autoremove --purge -y || true && \
+
+    apt autoclean || true
+
+RUN find /usr -name "*libdb5.3*" -delete 2>/dev/null || true && \
+
+    find /lib -name "*libdb5.3*" -delete 2>/dev/null || true && \
+
+    find /var -name "*libdb5.3*" -delete 2>/dev/null || true
+
+RUN echo "=== Checking for remaining libdb5.3 packages ===" && \
+
+    dpkg -l | grep libdb5.3 || echo "No libdb5.3 packages found"
+
+RUN apt clean && \
+
+    rm -rf /var/lib/apt/lists/*
