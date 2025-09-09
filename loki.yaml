@@ -1,121 +1,100 @@
-# AKS-Optimized Loki Configuration
-# This configuration is designed for Azure Kubernetes Service deployment
-
-# DefaultEndpointsProtocol=https;AccountName=storagesample;AccountKey=<account-key>
-
-
-
 loki:
+  auth_enabled: false
+  
+  commonConfig:
+    path_prefix: /var/loki
+    replication_factor: 1
+  
   storage:
-    type: azure
-    azure:
-      account_name: ${AZURE_STORAGE_ACCOUNT_NAME}
-      account_key: ${AZURE_STORAGE_ACCOUNT_KEY}
-      container_name: ${AZURE_STORAGE_CONTAINER_NAME}
-      endpoint_suffix: core.windows.net
-      max_retries: 5
-      # REMOVED: timeout field (not supported)
-      use_managed_identity: true
-    bucketNames:
-      chunks: loki-chunks-prod
-      ruler: loki-ruler-prod
-      admin: loki-admin-prod
-
-  # Schema configuration for production
+    type: filesystem
+    filesystem:
+      chunks_directory: /var/loki/chunks
+      rules_directory: /var/loki/rules
+  
   schemaConfig:
     configs:
-      - from: "2024-04-01"
-        store: tsdb
-        object_store: azure
-        schema: v13
+      - from: 2024-01-01
+        store: boltdb-shipper
+        object_store: filesystem
+        schema: v12
         index:
-          prefix: loki_index_
+          prefix: index_
           period: 24h
 
-  # Production limits configuration
   limits_config:
-    allow_structured_metadata: true
-    volume_enabled: true
-    # Production rate limits
-    ingestion_rate_mb: 200
-    ingestion_burst_size_mb: 400
-    max_concurrent_tail_requests: 200
-    # Timestamp handling
-    reject_old_samples: false
+    enforce_metric_name: false
+    reject_old_samples: true
     reject_old_samples_max_age: 168h
-    # Retention settings
-    retention_period: 2160h  # 90 days retention
-    # Query limits
-    max_query_series: 500000
-    max_query_parallelism: 64
-    max_entries_limit_per_query: 10000
-    max_query_length: 2161h
-    max_query_lookback: 2161h
-    # Per-tenant limits
-    per_stream_rate_limit: 3MB
-    per_stream_rate_limit_burst: 15MB
-    max_streams_per_user: 10000
-    max_line_size: 256000
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
 
-  # Common configuration for production
-  commonConfig:
-    replication_factor: 3
-    ring:
-      kvstore:
-        store: memberlist
-      heartbeat_timeout: 2m
-      heartbeat_period: 10s
-      num_tokens: 512
+# Use single binary deployment for simplicity
+deploymentMode: SingleBinary
 
-  # Production ingester configuration - FIXED
-  ingester:
-    chunk_encoding: snappy
-    chunk_idle_period: 2h
-    chunk_target_size: 2097152  # 2MB chunks
-    chunk_retain_period: 1m
-    max_chunk_age: 2h
-    # REMOVED: max_transfer_retries (not supported in ingester config)
-    wal:
-      enabled: true
-      dir: /var/loki/wal
-      checkpoint_duration: 10m
-      flush_on_shutdown: true
-      max_age: 24h
-      min_age: 1h
-
-  # Production querier configuration
-  querier:
-    max_concurrent: 16
-    query_timeout: 600s
-    engine:
-      timeout: 600s
-      max_look_back_period: 0s
-    max_samples: 10000000
-    max_series: 1000000
-
-  # Pattern ingester for production
-  pattern_ingester:
+singleBinary:
+  replicas: 1
+  
+  persistence:
     enabled: true
-    max_concurrent: 8
+    existingClaim: "loki"
+    
+  extraVolumes:
+    - name: loki-storage
+      persistentVolumeClaim:
+        claimName: loki
+  
+  extraVolumeMounts:
+    - name: loki-storage
+      mountPath: /var/loki
+      
+  resources:
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
 
-# Deployment mode for AKS
-deploymentMode: SimpleScalable
-
-# Backend configuration for AKS
-backend:
-  replicas: 2  # Increased for HA in AKS
-
-# Read component configuration
+# Disable other components for single binary mode
 read:
-  replicas: 2  # Increased for HA
-
-# Write component configuration
+  replicas: 0
 write:
-  replicas: 2  # Increased for HA and data durability
-
-# Gateway configuration for AKS
+  replicas: 0
+backend:
+  replicas: 0
 gateway:
-  service:
-    type: ClusterIP
-    port: 3100
-    targetPort: 8080
+  enabled: false
+ingester:
+  replicas: 0
+distributor:
+  replicas: 0
+querier:
+  replicas: 0
+queryFrontend:
+  replicas: 0
+queryScheduler:
+  replicas: 0
+compactor:
+  replicas: 0
+indexGateway:
+  replicas: 0
+bloomCompactor:
+  replicas: 0
+bloomGateway:
+  replicas: 0
+
+# Enable monitoring
+monitoring:
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false
+
+# Configure service
+service:
+  type: ClusterIP
+  port: 3100
+
+# Optional: Enable ingress if needed
+ingress:
+  enabled: false
