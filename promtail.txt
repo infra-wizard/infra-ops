@@ -1,16 +1,3 @@
-# promtail-values.yaml
-config:
-  lokiAddress: http://loki.loki.svc.cluster.local:3100/loki/api/v1/push
-  
-daemonset:
-  enabled: true
-  
-tolerations:
-  - key: node-role.kubernetes.io/master
-    operator: Exists
-    effect: NoSchedule
+helm install promtail grafana/promtail -n loki -f promtail-simple.yaml
 
 
-helm upgrade --install promtail grafana/promtail \
-  --namespace loki \
-  --values promtail-values.yaml
