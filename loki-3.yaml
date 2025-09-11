@@ -1,0 +1,144 @@
+loki:
+  auth_enabled: false
+  
+  # Common configuration
+  commonConfig:
+    path_prefix: /var/loki
+    ring:
+      kvstore:
+        store: memberlist
+    replication_factor: 1
+  
+  # Storage configuration
+  storage:
+    type: 'azure'
+    bucketNames:
+      chunks: loki
+      ruler: loki
+      admin: loki
+    azure:
+      container_name: loki
+      account_name: loki652
+      use_managed_identity: false
+      account_key: "2A38RdQ9z/WB7ehpgSbwu64x7+hQV2//P3nTjrPF3LlHcdG3qWMJf8s/47uiQH5RjGIMwIzysVIo+AStduRDRA=="
+      request_timeout: 30s
+
+  # Schema configuration
+  schemaConfig:
+    configs:
+      - from: 2024-04-01
+        store: tsdb
+        object_store: azure
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # Compactor configuration
+  compactor:
+    working_directory: /var/loki/retention
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+    delete_request_store: azure
+
+# Disable caching for simpler setup
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+# Configure Grafana Agent for log collection
+monitoring:
+  selfMonitoring:
+    grafanaAgent:
+      installOperator: true
+  # Enable log collection from all namespaces
+  logs:
+    enabled: true
+    
+# Configure the agent to collect logs from all pods
+grafana-agent:
+  enabled: true
+  agent:
+    mode: 'flow'
+    configMap:
+      content: |
+        discovery.kubernetes "pod" {
+          role = "pod"
+        }
+
+        discovery.relabel "pod_logs" {
+          targets = discovery.kubernetes.pod.targets
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_phase"]
+            regex = "Pending|Succeeded|Failed|Completed"
+            action = "drop"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            regex = ""
+            action = "drop"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_namespace"]
+            target_label = "namespace"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_name"]
+            target_label = "pod"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_container_name"]
+            target_label = "container"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_label_app"]
+            target_label = "app"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_node_name"]
+            target_label = "node_name"
+          }
+
+          rule {
+            source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+            target_label = "__path__"
+            separator = "/"
+            replacement = "/var/log/pods/*$1/*.log"
+          }
+        }
+
+        local.file_match "pod_logs" {
+          path_targets = discovery.relabel.pod_logs.output
+        }
+
+        loki.source.file "pod_logs" {
+          targets    = local.file_match.pod_logs.targets
+          forward_to = [loki.write.grafana_loki.receiver]
+        }
+
+        loki.write "grafana_loki" {
+          endpoint {
+            url = "http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push"
+          }
+        }
+
+# Additional settings for better testing experience
+gateway:
+  replicas: 1
+
+write:
+  replicas: 1
+
+read:
+  replicas: 1
