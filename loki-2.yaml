@@ -1,0 +1,95 @@
+# loki-values.yaml - Fixed configuration for testing
+loki:
+  auth_enabled: false
+  
+  # Common configuration
+  commonConfig:
+    path_prefix: /var/loki
+    ring:
+      kvstore:
+        store: memberlist
+    replication_factor: 1
+  
+  # Storage configuration
+  storage:
+    type: 'azure'
+    bucketNames:
+      chunks: loki
+      ruler: loki
+      admin: loki
+    azure:
+      container_name: loki
+      account_name: loki652
+      use_managed_identity: false
+      account_key: "2A38RdQ9z/WB7ehpgSbwu64x7+hQV2//P3nTjrPF3LlHcdG3qWMJf8s/47uiQH5RjGIMwIzysVIo+AStduRDRA=="
+      request_timeout: 30s
+
+  # Schema configuration
+  schemaConfig:
+    configs:
+      - from: 2024-04-01
+        store: tsdb
+        object_store: azure
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+
+  # Compactor configuration
+  compactor:
+    working_directory: /var/loki/retention
+    compaction_interval: 10m
+    retention_enabled: true
+    retention_delete_delay: 2h
+    retention_delete_worker_count: 150
+    delete_request_store: azure
+
+monitoring:
+  selfMonitoring:
+    grafanaAgent:
+      installOperator: true
+
+# Additional settings for better testing experience
+gateway:
+  replicas: 1  # Single replica for testing
+
+write:
+  replicas: 1  # Single replica for testing
+
+read:
+  replicas: 1  # Single replica for testing
+
+# Disable caching for simpler setup
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+# Disable bloom filters for testing
+bloomCompactor:
+  enabled: false
+
+bloomGateway:
+  enabled: false
+
+---
+# separate-grafana-values.yaml - To deploy Grafana alongside
+persistence:
+  enabled: true
+  size: 10Gi
+
+adminPassword: "admin123"  # Change this!
+
+service:
+  type: LoadBalancer  # For easy access in testing
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+    - name: Loki
+      type: loki
+      access: proxy
+      url: http://loki-gateway.loki.svc.cluster.local
+      isDefault: true
