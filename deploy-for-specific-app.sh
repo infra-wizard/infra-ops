@@ -7,6 +7,7 @@ set -e
 
 # Configuration
 APP_NAME="twx-twx-thingworx"
+APP_LABEL="thingworx-server"
 APP_NAMESPACE="twx"
 MONITORING_NAMESPACE="monitoring"
 
@@ -72,11 +73,16 @@ check_app_exists() {
 detect_app_jmx() {
     print_status "Detecting JMX configuration for $APP_NAME..."
     
-    # Get pods for the specific app
-    local pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_NAME --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+    # Get pods for the specific app using the correct label
+    local pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
     
     if [ -z "$pods" ]; then
         # Try alternative selectors
+        pods=$(kubectl get pods -n $APP_NAMESPACE -l name=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+    fi
+    
+    if [ -z "$pods" ]; then
+        # Try by name pattern
         pods=$(kubectl get pods -n $APP_NAMESPACE --field-selector metadata.name=$APP_NAME --no-headers 2>/dev/null | awk '{print $1}' || echo "")
     fi
     
@@ -188,12 +194,17 @@ data:
     discovery.kubernetes "specific_java_app" {
       role = "pod"
       
-      // Target specific application
+      // Target specific application using the correct label
       selectors {
-        app = "$APP_NAME"
+        app = "$APP_LABEL"
       }
       
       // Alternative selectors for StatefulSet
+      selectors {
+        name = "$APP_LABEL"
+      }
+      
+      // Additional selectors for StatefulSet
       selectors {
         app.kubernetes.io/name = "$APP_NAME"
       }
@@ -519,12 +530,12 @@ EOF
 
     # Check if the specific app is being monitored
     print_status "Checking if $APP_NAME is being monitored..."
-    local monitored_pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_NAME --no-headers 2>/dev/null | wc -l)
+    local monitored_pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | wc -l)
     if [ "$monitored_pods" -gt 0 ]; then
-        print_status "✅ Found $monitored_pods pod(s) for $APP_NAME. They should be automatically discovered."
-        kubectl get pods -n $APP_NAMESPACE -l app=$APP_NAME
+        print_status "✅ Found $monitored_pods pod(s) for $APP_NAME with label app=$APP_LABEL. They should be automatically discovered."
+        kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL
     else
-        print_warning "No pods found for $APP_NAME with label app=$APP_NAME"
+        print_warning "No pods found for $APP_NAME with label app=$APP_LABEL"
         print_status "Available pods in namespace $APP_NAMESPACE:"
         kubectl get pods -n $APP_NAMESPACE
     fi
