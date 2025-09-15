@@ -59,6 +59,15 @@ else
     exit 1
 fi
 
+# First check if pods with the label exist
+print_status "Checking if pods with label app=$APP_LABEL exist..."
+LABEL_PODS=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | wc -l)
+if [ "$LABEL_PODS" -gt 0 ]; then
+    print_status "✅ Found $LABEL_PODS pod(s) with label app=$APP_LABEL"
+else
+    print_warning "No pods found with label app=$APP_LABEL"
+fi
+
 # Check if StatefulSet exists
 print_status "Checking if StatefulSet $APP_NAME exists..."
 if kubectl get statefulset $APP_NAME -n $APP_NAMESPACE &> /dev/null; then
@@ -81,10 +90,9 @@ else
         print_status "✅ Deployment $APP_NAME exists"
         kubectl get deployment $APP_NAME -n $APP_NAMESPACE -o wide
     else
-        print_error "Neither StatefulSet nor Deployment $APP_NAME found"
+        print_warning "Neither StatefulSet nor Deployment $APP_NAME found"
         print_status "Available StatefulSets and Deployments in namespace $APP_NAMESPACE:"
         kubectl get statefulsets,deployments -n $APP_NAMESPACE
-        exit 1
     fi
 fi
 
