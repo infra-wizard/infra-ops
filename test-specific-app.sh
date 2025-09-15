@@ -132,7 +132,7 @@ fi
 
 # Check containers in pods
 if [ -n "$PODS" ]; then
-    local pod_name=$(echo $PODS | head -1)
+    pod_name=$(echo $PODS | head -1)
     print_status "Analyzing pod: $pod_name"
     
     # Get container information
