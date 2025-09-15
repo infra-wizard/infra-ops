@@ -134,15 +134,21 @@ if [ -n "$PODS" ]; then
     print_status "Containers in pod:"
     kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n' | sed 's/^/  - /'
     
-    # Check for JMX sidecar containers
+    # Check for JMX sidecar containers (more flexible detection)
     print_status "Checking for JMX sidecar containers..."
-    JMX_CONTAINERS=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[?(@.name=~".*jmx.*|.*exporter.*")].name}' 2>/dev/null || echo "")
+    
+    # First, show all containers in the pod
+    print_status "All containers in pod:"
+    kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n' | sed 's/^/  - /'
+    
+    # Look for JMX sidecar containers with various patterns
+    JMX_CONTAINERS=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[?(@.name=~".*jmx.*|.*exporter.*|.*prometheus.*|.*metrics.*")].name}' 2>/dev/null || echo "")
     
     if [ -n "$JMX_CONTAINERS" ]; then
         print_status "✅ Found JMX sidecar containers: $JMX_CONTAINERS"
         
-        # Check JMX ports
-        JMX_PORTS=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[?(@.name=~".*jmx.*|.*exporter.*")].ports[?(@.name=~".*jmx.*|.*metrics.*")].containerPort}' 2>/dev/null || echo "")
+        # Check JMX ports (updated pattern)
+        JMX_PORTS=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[?(@.name=~".*jmx.*|.*exporter.*|.*prometheus.*|.*metrics.*")].ports[?(@.name=~".*jmx.*|.*metrics.*|.*prometheus.*")].containerPort}' 2>/dev/null || echo "")
         
         if [ -n "$JMX_PORTS" ]; then
             print_status "✅ JMX ports: $JMX_PORTS"
@@ -154,7 +160,7 @@ if [ -n "$PODS" ]; then
         for container in $JMX_CONTAINERS; do
             print_status "Testing JMX metrics endpoint for container: $container"
             
-            for port in 9404 8080 9090 8081; do
+            for port in 9404 8080 9090 8081 8082 8083; do
                 if kubectl exec $pod_name -n $APP_NAMESPACE -c $container -- curl -s http://localhost:$port/metrics >/dev/null 2>&1; then
                     print_status "✅ JMX metrics accessible on port $port for container $container"
                     
@@ -166,25 +172,29 @@ if [ -n "$PODS" ]; then
             done
         done
     else
-        print_warning "No JMX sidecar containers found"
+        print_warning "No JMX sidecar containers found with standard patterns"
         
-        # Check if JMX is running on main container
-        print_status "Checking if JMX is running on main container..."
-        MAIN_CONTAINER=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || echo "")
+        # Show detailed container information
+        print_status "Detailed container analysis:"
+        kubectl get pod $pod_name -n $APP_NAMESPACE -o json | jq -r '.spec.containers[] | "  - Name: " + .name + " | Image: " + .image' 2>/dev/null || echo "  (jq not available, showing raw container info)"
         
-        if [ -n "$MAIN_CONTAINER" ]; then
-            print_status "Testing JMX on main container: $MAIN_CONTAINER"
-            for port in 9404 8080 9090 8081; do
-                if kubectl exec $pod_name -n $APP_NAMESPACE -c $MAIN_CONTAINER -- curl -s http://localhost:$port/metrics >/dev/null 2>&1; then
-                    print_status "✅ JMX metrics accessible on port $port for main container $MAIN_CONTAINER"
+        # Check all containers for JMX metrics
+        print_status "Testing all containers for JMX metrics..."
+        ALL_CONTAINERS=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[*].name}' 2>/dev/null || echo "")
+        
+        for container in $ALL_CONTAINERS; do
+            print_status "Testing container: $container"
+            for port in 9404 8080 9090 8081 8082 8083; do
+                if kubectl exec $pod_name -n $APP_NAMESPACE -c $container -- curl -s http://localhost:$port/metrics >/dev/null 2>&1; then
+                    print_status "✅ JMX metrics accessible on port $port for container $container"
                     
                     # Get sample metrics
-                    print_status "Sample metrics from main container:"
-                    kubectl exec $pod_name -n $APP_NAMESPACE -c $MAIN_CONTAINER -- curl -s http://localhost:$port/metrics 2>/dev/null | head -5 | sed 's/^/  /'
+                    print_status "Sample metrics from $container:"
+                    kubectl exec $pod_name -n $APP_NAMESPACE -c $container -- curl -s http://localhost:$port/metrics 2>/dev/null | head -5 | sed 's/^/  /'
                     break
                 fi
             done
-        fi
+        done
     fi
     
     # Check pod labels
