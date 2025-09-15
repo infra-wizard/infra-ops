@@ -1,0 +1,311 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana-alloy
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: grafana-alloy
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["extensions"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: grafana-alloy
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: grafana-alloy
+subjects:
+- kind: ServiceAccount
+  name: grafana-alloy
+  namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-alloy-config
+  namespace: monitoring
+data:
+  alloy.river: |
+    // Grafana Alloy configuration for specific Java application: twx-twx-thingworx
+    // This configuration targets twx-twx-thingworx in namespace twx
+
+    // Logging configuration
+    logging {
+      level = "info"
+      format = "logfmt"
+    }
+
+    // Kubernetes service discovery for specific Java application
+    discovery.kubernetes "specific_java_app" {
+      role = "pod"
+      
+      // Target specific application using the correct label
+      selectors {
+        app.kubernetes.io/name = "thingworx-server"
+      }
+      
+      // Alternative selectors for StatefulSet
+      selectors {
+        app = "thingworx-server"
+      }
+      
+      // Additional selectors for StatefulSet
+      selectors {
+        name = "thingworx-server"
+      }
+    }
+
+    // JMX metrics collection from the specific application
+    prometheus.scrape "jmx_metrics" {
+      targets = discovery.kubernetes.specific_java_app.targets
+      scrape_interval = "30s"
+      metrics_path = "/metrics"  // JMX exporter endpoint
+      
+      // Relabel to use JMX exporter sidecar port
+      relabel_config {
+        source_labels = ["__address__"]
+        regex = "([^:]+):(.*)"
+        target_label = "__address__"
+        replacement = "${1}:5556"  // Use JMX port 5556
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        target_label  = "app_name"
+      }
+      
+      // Add specific labels for this application
+      relabel_config {
+        source_labels = []
+        target_label  = "target_app"
+        replacement = "twx-twx-thingworx"
+      }
+    }
+
+    // Container metrics collection for the specific application
+    prometheus.scrape "container_metrics" {
+      targets = discovery.kubernetes.specific_java_app.targets
+      scrape_interval = "30s"
+      metrics_path = "/metrics/cadvisor"
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      
+      relabel_config {
+        source_labels = ["__meta_kubernetes_pod_label_app"]
+        target_label  = "app"
+      }
+    }
+
+    // Log collection from the specific Java application
+    loki.source.kubernetes "java_logs" {
+      targets = discovery.kubernetes.specific_java_app.targets
+      forward_to = [loki.process.java_logs.receiver]
+    }
+
+    // Advanced log processing for the specific Java application
+    loki.process "java_logs" {
+      forward_to = [loki.write.default.receiver]
+      
+      // Parse standard Java log formats
+      stage.regex {
+        expression = "(?P<timestamp>\\d{4}-\\d{2}-\\d{2}\\s+\\d{2}:\\d{2}:\\d{2}\\.\\d{3})\\s+(?P<level>\\w+)\\s+(?P<thread>\\[.*?\\])\\s+(?P<logger>\\S+)\\s+-\\s+(?P<message>.*)"
+      }
+      
+      // Parse ISO timestamp format
+      stage.regex {
+        expression = "(?P<timestamp>\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z)\\s+(?P<level>\\w+)\\s+(?P<thread>\\[.*?\\])\\s+(?P<logger>\\S+)\\s+-\\s+(?P<message>.*)"
+      }
+      
+      // Add labels for better organization
+      stage.labels {
+        values = {
+          level = "",
+          logger = "",
+          thread = "",
+        }
+      }
+      
+      // Add Kubernetes metadata labels
+      stage.labels {
+        values = {
+          app = "$__meta_kubernetes_pod_label_app",
+          namespace = "$__meta_kubernetes_namespace",
+          pod = "$__meta_kubernetes_pod_name",
+          node = "$__meta_kubernetes_node_name",
+          container = "$__meta_kubernetes_pod_container_name",
+          target_app = "twx-twx-thingworx",
+        }
+      }
+      
+      // Filter out health check and noise logs
+      stage.match {
+        selector = "{level=\"INFO\"} |= \"health\" |= \"heartbeat\""
+        action = "drop"
+      }
+      
+      // Extract error patterns
+      stage.regex {
+        expression = "(?P<error_type>Exception|Error|FATAL|CRITICAL|OutOfMemoryError|StackOverflowError)"
+        action = "keep"
+      }
+    }
+
+    // Prometheus remote write configuration
+    prometheus.remote_write "default" {
+      endpoint {
+        url = "https://prometheus-us-central1.grafana.net/api/prom/push"
+        
+        // Add your Grafana Cloud credentials here
+        // basic_auth {
+        //   username = env("GRAFANA_CLOUD_USERNAME")
+        //   password = env("GRAFANA_CLOUD_API_KEY")
+        // }
+      }
+      
+      // Write configuration
+      write_relabel_config {
+        source_labels = ["__name__"]
+        regex = "up"
+        action = "drop"
+      }
+    }
+
+    // Loki write configuration
+    loki.write "default" {
+      endpoint {
+        url = "https://logs-prod-us-central1.grafana.net/loki/api/v1/push"
+        
+        // Add your Grafana Cloud credentials here
+        // basic_auth {
+        //   username = env("GRAFANA_CLOUD_USERNAME")
+        //   password = env("GRAFANA_CLOUD_API_KEY")
+        // }
+      }
+    }
+
+    // Export metrics for debugging
+    prometheus.exporter.self "alloy" {}
+
+    prometheus.scrape "alloy" {
+      targets    = prometheus.exporter.self.alloy.targets
+      scrape_interval = "30s"
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana-alloy
+  namespace: monitoring
+  labels:
+    app: grafana-alloy
+    target-app: twx-twx-thingworx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana-alloy
+  template:
+    metadata:
+      labels:
+        app: grafana-alloy
+        target-app: twx-twx-thingworx
+    spec:
+      serviceAccountName: grafana-alloy
+      containers:
+      - name: grafana-alloy
+        image: grafana/alloy:latest
+        args:
+          - run
+          - /etc/alloy/alloy.river
+          - --server.http.listen-addr=0.0.0.0:12345
+          - --storage.path=/var/lib/alloy/data
+        ports:
+        - containerPort: 12345
+          name: http
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/alloy
+        - name: storage
+          mountPath: /var/lib/alloy
+        env:
+        - name: GRAFANA_CLOUD_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: username
+        - name: GRAFANA_CLOUD_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: grafana-cloud-credentials
+              key: api-key
+      volumes:
+      - name: config
+        configMap:
+          name: grafana-alloy-config
+      - name: storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-alloy
+  namespace: monitoring
+  labels:
+    app: grafana-alloy
+    target-app: twx-twx-thingworx
+spec:
+  selector:
+    app: grafana-alloy
+  ports:
+  - port: 12345
+    targetPort: 12345
+    name: http
+  type: ClusterIP
