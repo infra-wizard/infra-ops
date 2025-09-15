@@ -190,16 +190,10 @@ data:
       }
     }
 
-    // Prometheus remote write configuration
+    // Prometheus remote write configuration for self-hosted Prometheus
     prometheus.remote_write "default" {
       endpoint {
-        url = "https://prometheus-us-central1.grafana.net/api/prom/push"
-        
-        // Add your Grafana Cloud credentials here
-        // basic_auth {
-        //   username = env("GRAFANA_CLOUD_USERNAME")
-        //   password = env("GRAFANA_CLOUD_API_KEY")
-        // }
+        url = "http://prometheus-server.monitoring.svc.cluster.local:80/api/v1/write"
       }
       
       // Write configuration
@@ -210,16 +204,10 @@ data:
       }
     }
 
-    // Loki write configuration
+    // Loki write configuration for self-hosted Loki
     loki.write "default" {
       endpoint {
-        url = "https://logs-prod-us-central1.grafana.net/loki/api/v1/push"
-        
-        // Add your Grafana Cloud credentials here
-        // basic_auth {
-        //   username = env("GRAFANA_CLOUD_USERNAME")
-        //   password = env("GRAFANA_CLOUD_API_KEY")
-        // }
+        url = "http://loki.monitoring.svc.cluster.local:3100/loki/api/v1/push"
       }
     }
 
@@ -275,17 +263,7 @@ spec:
           mountPath: /etc/alloy
         - name: storage
           mountPath: /var/lib/alloy
-        env:
-        - name: GRAFANA_CLOUD_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: username
-        - name: GRAFANA_CLOUD_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: grafana-cloud-credentials
-              key: api-key
+        # No environment variables needed for self-hosted setup
       volumes:
       - name: config
         configMap:
