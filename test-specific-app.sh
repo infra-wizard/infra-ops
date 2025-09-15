@@ -7,6 +7,7 @@ set -e
 
 # Configuration
 APP_NAME="twx-twx-thingworx"
+APP_LABEL="thingworx-server"
 APP_NAMESPACE="twx"
 
 # Colors for output
@@ -88,22 +89,27 @@ else
 fi
 
 # Check pods
-print_status "Checking pods for $APP_NAME..."
-PODS=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_NAME --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+print_status "Checking pods for $APP_NAME with label app=$APP_LABEL..."
+PODS=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
 
 if [ -z "$PODS" ]; then
     # Try alternative selectors
+    PODS=$(kubectl get pods -n $APP_NAMESPACE -l name=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+fi
+
+if [ -z "$PODS" ]; then
+    # Try by name pattern
     PODS=$(kubectl get pods -n $APP_NAMESPACE --field-selector metadata.name=$APP_NAME --no-headers 2>/dev/null | awk '{print $1}' || echo "")
 fi
 
 if [ -z "$PODS" ]; then
-    print_warning "No pods found with label app=$APP_NAME"
+    print_warning "No pods found with label app=$APP_LABEL or name=$APP_LABEL"
     print_status "Available pods in namespace $APP_NAMESPACE:"
     kubectl get pods -n $APP_NAMESPACE
     print_status "Trying to find pods by name pattern..."
     kubectl get pods -n $APP_NAMESPACE | grep -i thingworx || echo "No pods found with 'thingworx' in name"
 else
-    print_status "✅ Found pods for $APP_NAME:"
+    print_status "✅ Found pods for $APP_NAME with label app=$APP_LABEL:"
     echo "$PODS" | while read pod; do
         if [ -n "$pod" ]; then
             echo "  - $pod"
@@ -185,6 +191,7 @@ fi
 # Summary
 print_header "Summary"
 print_status "Application: $APP_NAME"
+print_status "Label: app=$APP_LABEL"
 print_status "Namespace: $APP_NAMESPACE"
 print_status "Pods found: $(echo $PODS | wc -w)"
 
