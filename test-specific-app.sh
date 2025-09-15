@@ -2,6 +2,16 @@
 
 # kubectl get pod twx-twx-thingworx-0 -n twx -o json | jq -r '.spec.containers[] | select(.name | test("jmx|exporter|prometheus|metrics")) | .name'
 
+kubectl get pod twx-twx-thingworx-0 -n twx -o json | jq -r '
+  .spec.containers[]
+  | select(.name | test("jmx|exporter|prometheus|metrics"))
+  | .ports[]
+  | select(.name | test("jmx|metrics|prometheus"))
+  | .containerPort
+'
+
+kubectl exec twx-twx-thingworx-0 -n twx -c prometheus-jmx-exporter -- curl -s http://localhost:9404/metrics | head -10
+
 # Test script for specific Java application: twx-twx-thingworx
 # This script helps verify the application and JMX setup before deployment
 
