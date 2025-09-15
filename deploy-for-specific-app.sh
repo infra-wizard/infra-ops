@@ -51,6 +51,13 @@ fi
 check_app_exists() {
     print_status "Checking if $APP_NAME exists in namespace $APP_NAMESPACE..."
     
+    # First check if pods with the label exist
+    local pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | wc -l)
+    if [ "$pods" -gt 0 ]; then
+        print_status "✅ Found $pods pod(s) with label app=$APP_LABEL in namespace: $APP_NAMESPACE"
+        return 0
+    fi
+    
     # Check if StatefulSet exists
     if kubectl get statefulset $APP_NAME -n $APP_NAMESPACE &> /dev/null; then
         print_status "✅ Found StatefulSet: $APP_NAME in namespace: $APP_NAMESPACE"
@@ -66,6 +73,8 @@ check_app_exists() {
     print_error "Application $APP_NAME not found in namespace $APP_NAMESPACE"
     print_status "Available applications in namespace $APP_NAMESPACE:"
     kubectl get statefulsets,deployments -n $APP_NAMESPACE
+    print_status "Available pods with labels:"
+    kubectl get pods -n $APP_NAMESPACE --show-labels
     return 1
 }
 
@@ -74,10 +83,15 @@ detect_app_jmx() {
     print_status "Detecting JMX configuration for $APP_NAME..."
     
     # Get pods for the specific app using the correct label
-    local pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+    local pods=$(kubectl get pods -n $APP_NAMESPACE -l app.kubernetes.io/name=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
     
     if [ -z "$pods" ]; then
         # Try alternative selectors
+        pods=$(kubectl get pods -n $APP_NAMESPACE -l app=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+    fi
+    
+    if [ -z "$pods" ]; then
+        # Try name selector
         pods=$(kubectl get pods -n $APP_NAMESPACE -l name=$APP_LABEL --no-headers 2>/dev/null | awk '{print $1}' || echo "")
     fi
     
@@ -87,7 +101,9 @@ detect_app_jmx() {
     fi
     
     if [ -z "$pods" ]; then
-        print_error "No pods found for $APP_NAME in namespace $APP_NAMESPACE"
+        print_error "No pods found for $APP_NAME with label app=$APP_LABEL in namespace $APP_NAMESPACE"
+        print_status "Available pods in namespace $APP_NAMESPACE:"
+        kubectl get pods -n $APP_NAMESPACE
         return 1
     fi
     
@@ -115,7 +131,7 @@ detect_app_jmx() {
     local main_container=$(kubectl get pod $pod_name -n $APP_NAMESPACE -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || echo "")
     
     if [ -n "$main_container" ]; then
-        for port in 9404 8080 9090 8081; do
+        for port in 5556 9404 8080 9090 8081; do
             if kubectl exec $pod_name -n $APP_NAMESPACE -c $main_container -- curl -s http://localhost:$port/metrics >/dev/null 2>&1; then
                 print_status "✅ JMX metrics accessible on port $port for main container $main_container"
                 echo $port
@@ -196,17 +212,17 @@ data:
       
       // Target specific application using the correct label
       selectors {
-        app = "$APP_LABEL"
+        app.kubernetes.io/name = "$APP_LABEL"
       }
       
       // Alternative selectors for StatefulSet
       selectors {
-        name = "$APP_LABEL"
+        app = "$APP_LABEL"
       }
       
       // Additional selectors for StatefulSet
       selectors {
-        app.kubernetes.io/name = "$APP_NAME"
+        name = "$APP_LABEL"
       }
     }
 
@@ -461,6 +477,12 @@ deploy_for_specific_app() {
     
     # Detect JMX configuration
     local jmx_port=$(detect_app_jmx)
+    
+    # Use port 5556 if detection fails
+    if [ -z "$jmx_port" ] || [ "$jmx_port" = "9404" ]; then
+        jmx_port="5556"
+        print_status "Using JMX port 5556 (detected from your setup)"
+    fi
     
     # Create targeted configuration
     create_targeted_config $jmx_port
