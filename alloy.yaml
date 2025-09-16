@@ -148,15 +148,19 @@ alloy:
 
       // Scrape kubernetes API server
       prometheus.scrape "apiserver" {
-        targets = [{
-          __address__ = "kubernetes.default.svc.cluster.local:443"
-        }]
+        targets = discovery.kubernetes.endpoints.targets
         forward_to = [prometheus.remote_write.default.receiver]
         
         scheme = "https"
         bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
         tls_config {
           ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+        }
+        
+        relabel_rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_service_name", "__meta_kubernetes_endpoint_port_name"]
+          regex = "default;kubernetes;https"
+          action = "keep"
         }
         
         relabel_rule {
