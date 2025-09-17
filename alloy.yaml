@@ -37,26 +37,26 @@ alloy:
       // Prometheus remote write configuration
       prometheus.remote_write "prometheus" {
         endpoint {
-          url = "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write"
+          url = "http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
         }
       }
 
       // Loki client configuration
       loki.write "loki" {
         endpoint {
-          url = "http://loki-gateway.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+          url = "http://loki-gateway.monitoring.svc.cluster.local:80/loki/api/v1/push"
         }
       }
 
       // Tempo client configuration
-      // otelcol.exporter.otlp "tempo" {
-      //   client {
-      //     endpoint = "tempo.observability.svc.cluster.local:4317"
-      //     tls {
-      //       insecure = true
-      //     }
-      //   }
-      // }
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.observability.svc.cluster.local:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
 
       // Metrics collection from Kubernetes pods
       prometheus.scrape "pods" {
@@ -64,25 +64,6 @@ alloy:
         scrape_interval = "30s"
         metrics_path = "/metrics"
         forward_to = [prometheus.remote_write.prometheus.receiver]
-        
-        relabel_config {
-          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
-          action = "keep"
-          regex = "true"
-        }
-        
-        relabel_config {
-          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
-          target_label = "__metrics_path__"
-          regex = "(.+)"
-        }
-        
-        relabel_config {
-          source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
-          target_label = "__address__"
-          regex = "([^:]+)(?::\\d+)?;(\\d+)"
-          replacement = "${1}:${2}"
-        }
       }
 
       // Metrics collection from Kubernetes nodes
@@ -91,12 +72,6 @@ alloy:
         scrape_interval = "30s"
         metrics_path = "/metrics"
         forward_to = [prometheus.remote_write.prometheus.receiver]
-        
-        relabel_config {
-          source_labels = ["__meta_kubernetes_node_annotation_prometheus_io_scrape"]
-          action = "keep"
-          regex = "true"
-        }
       }
 
       // Metrics collection from Kubernetes services
@@ -105,12 +80,6 @@ alloy:
         scrape_interval = "30s"
         metrics_path = "/metrics"
         forward_to = [prometheus.remote_write.prometheus.receiver]
-        
-        relabel_config {
-          source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_scrape"]
-          action = "keep"
-          regex = "true"
-        }
       }
 
       // Log collection from Kubernetes pods
@@ -123,21 +92,6 @@ alloy:
       loki.source.kubernetes "nodes" {
         targets = discovery.kubernetes.nodes.targets
         forward_to = [loki.write.loki.receiver]
-      }
-
-      // Trace collection from Kubernetes pods
-      otelcol.receiver.otlp "traces" {
-        grpc {
-          endpoint = "0.0.0.0:4317"
-        }
-        
-        http {
-          endpoint = "0.0.0.0:4318"
-        }
-        
-        output {
-          traces = [otelcol.exporter.otlp.tempo.input]
-        }
       }
 
       // Alloy's own metrics
