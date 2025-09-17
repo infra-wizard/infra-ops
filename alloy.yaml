@@ -1,312 +1,149 @@
-# Fixed values.yaml for Helm deployment
 alloy:
   configMap:
-    create: true
     content: |
-      // Logging configuration
+      // Alloy configuration for collecting metrics, logs, and traces
+      // and forwarding them to Prometheus, Loki, and Tempo
+
       logging {
         level  = "info"
         format = "logfmt"
       }
 
-      // Kubernetes service discovery for pods
+      // Kubernetes discovery for pods, nodes, services, etc.
       discovery.kubernetes "pods" {
         role = "pod"
       }
 
-      // Kubernetes service discovery for services
-      discovery.kubernetes "services" {
-        role = "service"
-      }
-
-      // Kubernetes service discovery for endpoints
-      discovery.kubernetes "endpoints" {
-        role = "endpoints"
-      }
-
-      // Kubernetes service discovery for nodes
       discovery.kubernetes "nodes" {
         role = "node"
       }
 
-      // Scrape kubelet metrics
-      prometheus.scrape "kubelet" {
-        targets = discovery.kubernetes.nodes.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        scheme = "https"
-        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-        tls_config {
-          ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          insecure_skip_verify = true
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_node_name"]
-          regex         = "(.+)"
-          target_label  = "__address__"
-          replacement   = "${1}:10250"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_node_name"]
-          regex         = "(.+)"
-          target_label  = "node"
-          replacement   = "${1}"
-        }
-        
-        relabel_rule {
-          target_label = "__metrics_path__"
-          replacement  = "/metrics"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
+      discovery.kubernetes "services" {
+        role = "service"
       }
 
-      // Scrape kubelet cadvisor metrics
-      prometheus.scrape "cadvisor" {
-        targets = discovery.kubernetes.nodes.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        scheme = "https"
-        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-        tls_config {
-          ca_file = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-          insecure_skip_verify = true
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_node_name"]
-          regex         = "(.+)"
-          target_label  = "__address__"
-          replacement   = "${1}:10250"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_node_name"]
-          regex         = "(.+)"
-          target_label  = "node"
-          replacement   = "${1}"
-        }
-        
-        relabel_rule {
-          target_label = "__metrics_path__"
-          replacement  = "/metrics/cadvisor"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
+      discovery.kubernetes "endpoints" {
+        role = "endpoints"
       }
 
-      // Scrape kube-state-metrics
-      prometheus.scrape "kube_state_metrics" {
-        targets = discovery.kubernetes.services.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_name"]
-          regex         = "kube-state-metrics"
-          action        = "keep"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_port_name"]
-          regex         = "http-metrics"
-          action        = "keep"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
+      discovery.kubernetes "endpointslices" {
+        role = "endpointslice"
       }
 
-      // Scrape node-exporter
-      prometheus.scrape "node_exporter" {
-        targets = discovery.kubernetes.services.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_name"]
-          regex         = "node-exporter"
-          action        = "keep"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_port_name"]
-          regex         = "http-metrics"
-          action        = "keep"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
+      discovery.kubernetes "ingresses" {
+        role = "ingress"
       }
 
-      // Scrape pods with prometheus annotations
-      prometheus.scrape "kubernetes_pods" {
-        targets = discovery.kubernetes.pods.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        // Keep only pods with prometheus.io/scrape annotation
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
-          regex         = "true"
-          action        = "keep"
-        }
-        
-        // Use custom metrics path if specified
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
-          regex         = "(.+)"
-          target_label  = "__metrics_path__"
-          replacement   = "${1}"
-        }
-        
-        // Use custom port if specified
-        relabel_rule {
-          source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
-          regex         = "([^:]+)(?::[0-9]+)?;([0-9]+)"
-          target_label  = "__address__"
-          replacement   = "${1}:${2}"
-        }
-        
-        // Add pod labels
-        relabel_rule {
-          regex       = "__meta_kubernetes_pod_label_(.+)"
-          action      = "labelmap"
-          replacement = "${1}"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_namespace"]
-          target_label  = "namespace"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_pod_name"]
-          target_label  = "pod"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
-      }
-
-      // Scrape services with prometheus annotations
-      prometheus.scrape "kubernetes_services" {
-        targets = discovery.kubernetes.services.targets
-        forward_to = [prometheus.remote_write.default.receiver]
-        
-        // Keep only services with prometheus.io/scrape annotation
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_scrape"]
-          regex         = "true"
-          action        = "keep"
-        }
-        
-        // Use custom metrics path if specified
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_path"]
-          regex         = "(.+)"
-          target_label  = "__metrics_path__"
-          replacement   = "${1}"
-        }
-        
-        // Use custom port if specified
-        relabel_rule {
-          source_labels = ["__address__", "__meta_kubernetes_service_annotation_prometheus_io_port"]
-          regex         = "([^:]+)(?::[0-9]+)?;([0-9]+)"
-          target_label  = "__address__"
-          replacement   = "${1}:${2}"
-        }
-        
-        // Add service labels
-        relabel_rule {
-          regex       = "__meta_kubernetes_service_label_(.+)"
-          action      = "labelmap"
-          replacement = "${1}"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_namespace"]
-          target_label  = "namespace"
-        }
-        
-        relabel_rule {
-          source_labels = ["__meta_kubernetes_service_name"]
-          target_label  = "service"
-        }
-        
-        scrape_interval = "30s"
-        scrape_timeout = "10s"
-      }
-
-      // Forward all metrics to your self-hosted Prometheus
-      prometheus.remote_write "default" {
+      // Prometheus remote write configuration
+      prometheus.remote_write "prometheus" {
         endpoint {
-          url = "http://prometheus-server.monitoring.svc.cluster.local:80/api/v1/write"
-          // If your Prometheus is outside the cluster, use:
-          // url = "http://YOUR_PROMETHEUS_HOST:9090/api/v1/write"
-          
-          // Add basic auth if your Prometheus requires it
-          // basic_auth {
-          //   username = "your-username"
-          //   password = "your-password"
-          // }
-          
-          // Queue configuration for high-throughput environments
-          queue_config {
-            capacity = 10000
-            max_shards = 10
-            min_shards = 1
-            max_samples_per_send = 2000
-            batch_send_deadline = "5s"
-            min_backoff = "30ms"
-            max_backoff = "100ms"
-          }
+          url = "http://kube-prometheus-stack-prometheus.observability.svc.cluster.local:9090/api/v1/write"
         }
       }
 
-  # Resource configuration
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "1Gi"
-      cpu: "1000m"
+      // Loki client configuration
+      loki.write "loki" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local:3100/loki/api/v1/push"
+        }
+      }
 
-  # Security context
-  securityContext:
-    runAsUser: 473
-    runAsGroup: 473
-    fsGroup: 473
-    runAsNonRoot: true
+      // Tempo client configuration
+      # otelcol.exporter.otlp "tempo" {
+      #   client {
+      #     endpoint = "tempo.observability.svc.cluster.local:4317"
+      #     tls {
+      #       insecure = true
+      #     }
+      #   }
+      # }
 
-  # Service account
-  serviceAccount:
-    create: true
-    name: "alloy"
+      // Metrics collection from Kubernetes pods
+      prometheus.scrape "pods" {
+        targets    = discovery.kubernetes.pods.targets
+        scrape_interval = "30s"
+        metrics_path = "/metrics"
+        forward_to = [prometheus.remote_write.prometheus.receiver]
+        
+        relabel_config {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          action = "keep"
+          regex = "true"
+        }
+        
+        relabel_config {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+          target_label = "__metrics_path__"
+          regex = "(.+)"
+        }
+        
+        relabel_config {
+          source_labels = ["__address__", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          target_label = "__address__"
+          regex = "([^:]+)(?::\\d+)?;(\\d+)"
+          replacement = "${1}:${2}"
+        }
+      }
 
-# Deploy as DaemonSet for node-level metrics
-controller:
-  type: "daemonset"
+      // Metrics collection from Kubernetes nodes
+      prometheus.scrape "nodes" {
+        targets    = discovery.kubernetes.nodes.targets
+        scrape_interval = "30s"
+        metrics_path = "/metrics"
+        forward_to = [prometheus.remote_write.prometheus.receiver]
+        
+        relabel_config {
+          source_labels = ["__meta_kubernetes_node_annotation_prometheus_io_scrape"]
+          action = "keep"
+          regex = "true"
+        }
+      }
 
-# Pod security context
-podSecurityContext:
-  runAsUser: 473
-  runAsGroup: 473
-  fsGroup: 473
-  runAsNonRoot: true
+      // Metrics collection from Kubernetes services
+      prometheus.scrape "services" {
+        targets    = discovery.kubernetes.services.targets
+        scrape_interval = "30s"
+        metrics_path = "/metrics"
+        forward_to = [prometheus.remote_write.prometheus.receiver]
+        
+        relabel_config {
+          source_labels = ["__meta_kubernetes_service_annotation_prometheus_io_scrape"]
+          action = "keep"
+          regex = "true"
+        }
+      }
 
-# Node selector for AKS node pools (optional)
-nodeSelector: {}
+      // Log collection from Kubernetes pods
+      loki.source.kubernetes "pods" {
+        targets = discovery.kubernetes.pods.targets
+        forward_to = [loki.write.loki.receiver]
+      }
 
-# Tolerations for system nodes
-tolerations:
-  - effect: NoSchedule
-    key: kubernetes.io/arch
-    operator: Equal
-    value: amd64
-  - effect: NoSchedule
-    key: kubernetes.io/os
-    operator: Equal
-    value: linux
+      // Log collection from Kubernetes nodes
+      loki.source.kubernetes "nodes" {
+        targets = discovery.kubernetes.nodes.targets
+        forward_to = [loki.write.loki.receiver]
+      }
+
+      // Trace collection from Kubernetes pods
+      otelcol.receiver.otlp "traces" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+        
+        output {
+          traces = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      // Alloy's own metrics
+      prometheus.scrape "alloy_metrics" {
+        targets = [{"__address__" = "localhost:12345"}]
+        scrape_interval = "15s"
+        metrics_path = "/metrics"
+        forward_to = [prometheus.remote_write.prometheus.receiver]
+      }
