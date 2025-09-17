@@ -49,14 +49,14 @@ alloy:
       }
 
       // Tempo client configuration
-      # otelcol.exporter.otlp "tempo" {
-      #   client {
-      #     endpoint = "tempo.observability.svc.cluster.local:4317"
-      #     tls {
-      #       insecure = true
-      #     }
-      #   }
-      # }
+      // otelcol.exporter.otlp "tempo" {
+      //   client {
+      //     endpoint = "tempo.observability.svc.cluster.local:4317"
+      //     tls {
+      //       insecure = true
+      //     }
+      //   }
+      // }
 
       // Metrics collection from Kubernetes pods
       prometheus.scrape "pods" {
