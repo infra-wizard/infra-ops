@@ -1,0 +1,397 @@
+---
+# JMX connection configuration for Bitnami JMX Exporter
+# Connection to the Java application (same pod, different container)
+hostPort: 127.0.0.1:1099
+username: 
+password: 
+
+# Lowercase naming for Prometheus convention
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# SSL configuration
+ssl: false
+
+# Startup delay before serving metrics (milliseconds)
+startDelaySeconds: 0
+
+# Whitelist specific MBeans for better performance
+whitelistObjectNames:
+  # JVM Standard MBeans
+  - java.lang:type=Memory
+  - java.lang:type=MemoryPool,name=*
+  - java.lang:type=GarbageCollector,name=*
+  - java.lang:type=Threading
+  - java.lang:type=Runtime
+  - java.lang:type=ClassLoading
+  - java.lang:type=OperatingSystem
+  - java.lang:type=Compilation
+  
+  # NIO Buffer Pools
+  - java.nio:type=BufferPool,name=*
+  
+  # Tomcat/Catalina (for Spring Boot with embedded Tomcat)
+  - Tomcat:type=ThreadPool,name=*
+  - Tomcat:type=GlobalRequestProcessor,name=*
+  - Tomcat:type=Manager,context=*,host=*
+  - Tomcat:type=DataSource,class=*,name=*
+  
+  # Jetty (if using Jetty)
+  - org.eclipse.jetty.server:type=server,id=*
+  - org.eclipse.jetty.server:type=threadpool,id=*
+  
+  # HikariCP Connection Pool
+  - com.zaxxer.hikari:type=Pool,name=*
+  - com.zaxxer.hikari:type=PoolConfig,name=*
+  
+  # Kafka Client Metrics (if using Kafka)
+  - kafka.producer:type=producer-metrics,client-id=*
+  - kafka.producer:type=producer-node-metrics,client-id=*,node-id=*
+  - kafka.consumer:type=consumer-metrics,client-id=*
+  - kafka.consumer:type=consumer-node-metrics,client-id=*,node-id=*
+  
+  # Log4j2
+  - org.apache.logging.log4j2:type=*
+  
+  # Custom Application MBeans (update with your package)
+  - com.yourcompany:*
+  - com.yourcompany.app:type=*,name=*
+
+# Metric collection rules
+rules:
+  # ==================== JVM Memory Metrics ====================
+  
+  # Heap Memory
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>used'
+    name: jvm_memory_heap_used_bytes
+    help: "Current heap memory used in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>committed'
+    name: jvm_memory_heap_committed_bytes
+    help: "Current heap memory committed in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>max'
+    name: jvm_memory_heap_max_bytes
+    help: "Maximum heap memory in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>init'
+    name: jvm_memory_heap_init_bytes
+    help: "Initial heap memory in bytes"
+    type: GAUGE
+    
+  # Non-Heap Memory
+  - pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>used'
+    name: jvm_memory_nonheap_used_bytes
+    help: "Current non-heap memory used in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>committed'
+    name: jvm_memory_nonheap_committed_bytes
+    help: "Current non-heap memory committed in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Memory><NonHeapMemoryUsage>max'
+    name: jvm_memory_nonheap_max_bytes
+    help: "Maximum non-heap memory in bytes"
+    type: GAUGE
+    
+  # Memory Pools
+  - pattern: 'java.lang<type=MemoryPool, name=(.+)><Usage>used'
+    name: jvm_memory_pool_used_bytes
+    help: "Memory pool used in bytes"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=MemoryPool, name=(.+)><Usage>committed'
+    name: jvm_memory_pool_committed_bytes
+    help: "Memory pool committed in bytes"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=MemoryPool, name=(.+)><Usage>max'
+    name: jvm_memory_pool_max_bytes
+    help: "Memory pool max in bytes"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=MemoryPool, name=(.+)><PeakUsage>used'
+    name: jvm_memory_pool_peak_used_bytes
+    help: "Peak memory pool used in bytes"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  # ==================== Garbage Collection Metrics ====================
+  
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionCount'
+    name: jvm_gc_collection_count_total
+    help: "Total number of GC collections"
+    labels:
+      gc_name: "$1"
+    type: COUNTER
+    
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><>CollectionTime'
+    name: jvm_gc_collection_time_ms_total
+    help: "Total time spent in GC collection in milliseconds"
+    labels:
+      gc_name: "$1"
+    type: COUNTER
+    
+  - pattern: 'java.lang<type=GarbageCollector, name=(.+)><LastGcInfo>duration'
+    name: jvm_gc_last_duration_ms
+    help: "Duration of the last GC in milliseconds"
+    labels:
+      gc_name: "$1"
+    type: GAUGE
+    
+  # ==================== Thread Metrics ====================
+  
+  - pattern: 'java.lang<type=Threading><>ThreadCount'
+    name: jvm_threads_current_count
+    help: "Current thread count"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Threading><>PeakThreadCount'
+    name: jvm_threads_peak_count
+    help: "Peak thread count"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Threading><>DaemonThreadCount'
+    name: jvm_threads_daemon_count
+    help: "Daemon thread count"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Threading><>TotalStartedThreadCount'
+    name: jvm_threads_total_started_count
+    help: "Total started thread count"
+    type: COUNTER
+    
+  - pattern: 'java.lang<type=Threading><>DeadlockedThreads'
+    name: jvm_threads_deadlocked_count
+    help: "Number of deadlocked threads"
+    type: GAUGE
+    valueFactor: 0.0
+    
+  # ==================== Class Loading Metrics ====================
+  
+  - pattern: 'java.lang<type=ClassLoading><>LoadedClassCount'
+    name: jvm_classes_loaded_count
+    help: "Number of loaded classes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=ClassLoading><>UnloadedClassCount'
+    name: jvm_classes_unloaded_total
+    help: "Total number of unloaded classes"
+    type: COUNTER
+    
+  - pattern: 'java.lang<type=ClassLoading><>TotalLoadedClassCount'
+    name: jvm_classes_total_loaded_count
+    help: "Total number of classes loaded since JVM start"
+    type: COUNTER
+    
+  # ==================== Operating System Metrics ====================
+  
+  - pattern: 'java.lang<type=OperatingSystem><>ProcessCpuLoad'
+    name: jvm_process_cpu_load_percent
+    help: "Process CPU load percentage"
+    type: GAUGE
+    valueFactor: 100.0
+    
+  - pattern: 'java.lang<type=OperatingSystem><>SystemCpuLoad'
+    name: jvm_system_cpu_load_percent
+    help: "System CPU load percentage"
+    type: GAUGE
+    valueFactor: 100.0
+    
+  - pattern: 'java.lang<type=OperatingSystem><>ProcessCpuTime'
+    name: jvm_process_cpu_time_ns
+    help: "Process CPU time in nanoseconds"
+    type: COUNTER
+    
+  - pattern: 'java.lang<type=OperatingSystem><>FreePhysicalMemorySize'
+    name: jvm_system_memory_free_bytes
+    help: "Free physical memory in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=OperatingSystem><>TotalPhysicalMemorySize'
+    name: jvm_system_memory_total_bytes
+    help: "Total physical memory in bytes"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=OperatingSystem><>OpenFileDescriptorCount'
+    name: jvm_open_file_descriptors_count
+    help: "Number of open file descriptors"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=OperatingSystem><>MaxFileDescriptorCount'
+    name: jvm_max_file_descriptors_count
+    help: "Maximum number of file descriptors"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=OperatingSystem><>SystemLoadAverage'
+    name: jvm_system_load_average
+    help: "System load average"
+    type: GAUGE
+    
+  # ==================== Runtime Metrics ====================
+  
+  - pattern: 'java.lang<type=Runtime><>Uptime'
+    name: jvm_runtime_uptime_ms
+    help: "JVM uptime in milliseconds"
+    type: GAUGE
+    
+  - pattern: 'java.lang<type=Runtime><>StartTime'
+    name: jvm_runtime_start_time_ms
+    help: "JVM start time in milliseconds since epoch"
+    type: GAUGE
+    
+  # ==================== NIO Buffer Pool Metrics ====================
+  
+  - pattern: 'java.nio<type=BufferPool, name=(.+)><>Count'
+    name: jvm_buffer_pool_count
+    help: "Number of buffers in the pool"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'java.nio<type=BufferPool, name=(.+)><>MemoryUsed'
+    name: jvm_buffer_pool_used_bytes
+    help: "Memory used by buffers in the pool"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'java.nio<type=BufferPool, name=(.+)><>TotalCapacity'
+    name: jvm_buffer_pool_capacity_bytes
+    help: "Total capacity of buffers in the pool"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  # ==================== Tomcat Metrics ====================
+  
+  - pattern: 'Tomcat<type=ThreadPool, name="(\w+-\w+)-(\d+)"><>currentThreadCount'
+    name: tomcat_threads_current_count
+    help: "Current thread count in Tomcat"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: GAUGE
+    
+  - pattern: 'Tomcat<type=ThreadPool, name="(\w+-\w+)-(\d+)"><>currentThreadsBusy'
+    name: tomcat_threads_busy_count
+    help: "Busy thread count in Tomcat"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: GAUGE
+    
+  - pattern: 'Tomcat<type=ThreadPool, name="(\w+-\w+)-(\d+)"><>maxThreads'
+    name: tomcat_threads_max_count
+    help: "Maximum thread count in Tomcat"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: GAUGE
+    
+  - pattern: 'Tomcat<type=GlobalRequestProcessor, name="(\w+-\w+)-(\d+)"><>requestCount'
+    name: tomcat_request_count_total
+    help: "Total request count"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: COUNTER
+    
+  - pattern: 'Tomcat<type=GlobalRequestProcessor, name="(\w+-\w+)-(\d+)"><>errorCount'
+    name: tomcat_error_count_total
+    help: "Total error count"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: COUNTER
+    
+  - pattern: 'Tomcat<type=GlobalRequestProcessor, name="(\w+-\w+)-(\d+)"><>processingTime'
+    name: tomcat_processing_time_ms_total
+    help: "Total processing time"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: COUNTER
+    
+  - pattern: 'Tomcat<type=GlobalRequestProcessor, name="(\w+-\w+)-(\d+)"><>bytesReceived'
+    name: tomcat_bytes_received_total
+    help: "Total bytes received"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: COUNTER
+    
+  - pattern: 'Tomcat<type=GlobalRequestProcessor, name="(\w+-\w+)-(\d+)"><>bytesSent'
+    name: tomcat_bytes_sent_total
+    help: "Total bytes sent"
+    labels:
+      connector: "$1"
+      port: "$2"
+    type: COUNTER
+    
+  # ==================== HikariCP Connection Pool ====================
+  
+  - pattern: 'com.zaxxer.hikari<type=Pool, name=(.+)><>ActiveConnections'
+    name: hikaricp_active_connections
+    help: "Active connections"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'com.zaxxer.hikari<type=Pool, name=(.+)><>IdleConnections'
+    name: hikaricp_idle_connections
+    help: "Idle connections"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'com.zaxxer.hikari<type=Pool, name=(.+)><>PendingThreads'
+    name: hikaricp_pending_threads
+    help: "Pending threads waiting for connection"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  - pattern: 'com.zaxxer.hikari<type=Pool, name=(.+)><>TotalConnections'
+    name: hikaricp_total_connections
+    help: "Total connections"
+    labels:
+      pool: "$1"
+    type: GAUGE
+    
+  # ==================== Kafka Metrics (if using) ====================
+  
+  - pattern: 'kafka.producer<type=producer-metrics, client-id=(.+)><>record-send-total'
+    name: kafka_producer_records_sent_total
+    help: "Total records sent"
+    labels:
+      client_id: "$1"
+    type: COUNTER
+    
+  - pattern: 'kafka.consumer<type=consumer-metrics, client-id=(.+)><>records-consumed-total'
+    name: kafka_consumer_records_consumed_total
+    help: "Total records consumed"
+    labels:
+      client_id: "$1"
+    type: COUNTER
+    
+  # ==================== Custom Application Metrics ====================
+  
+  - pattern: 'com.yourcompany<type=(.+), name=(.+)><>(.+)'
+    name: application_$1_$3
+    help: "Application custom metric"
+    labels:
+      component: "$1"
+      name: "$2"
+    type: GAUGE
