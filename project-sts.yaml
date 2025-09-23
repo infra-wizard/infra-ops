@@ -1,5 +1,5 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: project-service
   namespace: kepler-app-dev
@@ -7,6 +7,7 @@ metadata:
     app: project-service
     argocd.argoproj.io/instance: project-service
 spec:
+  serviceName: project-service-headless
   replicas: 1
   selector:
     matchLabels:
@@ -16,10 +17,6 @@ spec:
       labels:
         app: project-service
       annotations:
-        pyroscope.io/scrape: "true"
-        pyroscope.io/application-name: "project-service"
-        pyroscope.io/profile-cpu-enabled: "true"
-        pyroscope.io/profile-mem-enabled: "true"
         vault.hashicorp.com/agent-init-first: "true"
         vault.hashicorp.com/agent-inject: "true"
         vault.hashicorp.com/agent-inject-secret-cds-api-key.yaml: "kv/customer-data-service/client/quality-flow/api-key"
@@ -45,9 +42,10 @@ spec:
       volumes:
         - name: skywalking-agent
           emptyDir: {}
-        - name: shared-data
+        - name: pyroscope-agent
           emptyDir: {}
       initContainers:
+        # SkyWalking agent init container
         - name: skywalking-agent-init
           image: apache/skywalking-java-agent:8.11.0-java11
           command:
@@ -59,17 +57,15 @@ spec:
             - name: skywalking-agent
               mountPath: /agent
           imagePullPolicy: IfNotPresent
-        - name: download-pyroscope-agent
-          image: curlimages/curl:latest
-          command:
-            - sh
-            - -c
-            - |
-              curl -L -o /shared/pyroscope.jar https://github.com/pyroscope-io/pyroscope-java/releases/download/v0.13.0/pyroscope.jar
-              ls -la /shared/pyroscope.jar
+        
+        # Custom Pyroscope agent init container
+        - name: pyroscope-agent-init
+          image: 411719562396.dkr.ecr.us-east-1.amazonaws.com/kepler-development/pyroscope-init:v0.13.0
           volumeMounts:
-            - name: shared-data
+            - name: pyroscope-agent
               mountPath: /shared
+          imagePullPolicy: IfNotPresent
+          
       containers:
         - name: project-service
           image: 411719562396.dkr.ecr.us-east-1.amazonaws.com/kepler-development/project-service:0388a63851e2ee395b85ccd1d3527b942cbb6ab0
@@ -77,13 +73,19 @@ spec:
             - name: http
               containerPort: 3000
               protocol: TCP
+            - name: jmx
+              containerPort: 9999
+              protocol: TCP
           env:
+            # Combined JAVA_TOOL_OPTIONS for both agents with modern GC logging
             - name: JAVA_TOOL_OPTIONS
-              value: "-javaagent:/skywalking/agent/skywalking-agent.jar -javaagent:/opt/pyroscope.jar"
+              value: "-javaagent:/skywalking/agent/skywalking-agent.jar -javaagent:/opt/pyroscope.jar -XX:+FlightRecorder -XX:StartFlightRecording=settings=profile -Xlog:gc*:gc.log:time,pid,tid,level,tags -XX:+UseG1GC"
+            # SkyWalking configuration
             - name: SW_AGENT_NAME
               value: project-service
             - name: SW_AGENT_COLLECTOR_BACKEND_SERVICES
               value: skywalking-oap.kepler-infra:11800
+            # Pyroscope configuration
             - name: PYROSCOPE_APPLICATION_NAME
               value: "project-service"
             - name: PYROSCOPE_SERVER_ADDRESS
@@ -91,11 +93,19 @@ spec:
             - name: PYROSCOPE_FORMAT
               value: "jfr"
             - name: PYROSCOPE_PROFILER_EVENT
-              value: "itimer"
+              value: "cpu,wall,alloc,lock"
             - name: PYROSCOPE_PROFILER_ALLOC
               value: "512k"
             - name: PYROSCOPE_PROFILER_LOCK
               value: "10ms"
+            # Enable memory profiling
+            - name: PYROSCOPE_PROFILER_ITIMER
+              value: "10ms"
+            - name: PYROSCOPE_ALLOC_EVENT
+              value: "true"
+            - name: PYROSCOPE_LOCK_EVENT
+              value: "true"
+            # Pod metadata for tags (StatefulSet specific)
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -109,9 +119,10 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: PYROSCOPE_TAGS
-              value: "pod=$(POD_NAME),namespace=$(POD_NAMESPACE),node=$(NODE_NAME),environment=dev"
+              value: "pod=$(POD_NAME),namespace=$(POD_NAMESPACE),node=$(NODE_NAME),environment=dev,statefulset=project-service"
+            # JVM settings with modern GC logging and memory profiling
             - name: JAVA_OPTS
-              value: "-Xms512m -Xmx1g -XX:+UseG1GC"
+              value: "-Xms512m -Xmx1g -XX:+UseG1GC -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=9999 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false"
           resources:
             limits:
               cpu: "1"
@@ -120,27 +131,55 @@ spec:
               cpu: "65m"
               memory: "2G"
           volumeMounts:
-            - name: shared-data
-              mountPath: /opt
             - name: skywalking-agent
               mountPath: /skywalking
+            - name: pyroscope-agent
+              mountPath: /opt
+            # StatefulSet persistent volume mount (if needed)
+            - name: data
+              mountPath: /app/data
           livenessProbe:
             httpGet:
               path: /project/actuator/health/liveness
               port: http
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /project/actuator/health/readiness
               port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
           startupProbe:
             httpGet:
               path: /project/actuator/health/liveness
               port: http
-            periodSeconds: 5
-            failureThreshold: 120
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           imagePullPolicy: IfNotPresent
-  strategy:
+  # StatefulSet specific: Volume Claim Templates for persistent storage
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: project-service
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: standard  # Adjust based on your cluster
+        resources:
+          requests:
+            storage: 10Gi
+  # StatefulSet update strategy
+  updateStrategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 25%
-      maxSurge: 25%
+      partition: 0
+  # Pod management policy
+  podManagementPolicy: OrderedReady
