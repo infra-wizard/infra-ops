@@ -1,0 +1,19 @@
+FROM alpine:latest
+
+# Install curl for downloading
+RUN apk add --no-cache curl
+
+# Download Pyroscope JAR
+RUN curl -L -o /pyroscope.jar https://github.com/pyroscope-io/pyroscope-java/releases/download/v0.13.0/pyroscope.jar && \
+    chmod +r /pyroscope.jar
+
+# Create entrypoint script
+RUN echo '#!/bin/sh' > /entrypoint.sh && \
+    echo 'echo "Copying Pyroscope JAR to shared volume..."' >> /entrypoint.sh && \
+    echo 'cp /pyroscope.jar /shared/pyroscope.jar' >> /entrypoint.sh && \
+    echo 'chmod +r /shared/pyroscope.jar' >> /entrypoint.sh && \
+    echo 'ls -la /shared/pyroscope.jar' >> /entrypoint.sh && \
+    echo 'echo "Pyroscope JAR copy completed successfully"' >> /entrypoint.sh && \
+    chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
