@@ -1,1 +1,9 @@
-kubectl get pods -n monitoring -o jsonpath="{range .items[*]}{.metadata.namespace}{'\t'}{.metadata.name}{'\t'}{range .spec.containers[*]}{.name}{': '}{.image}{'\n'}{end}{end}"
+We are configuring a Windows machine as a self-hosted runner for GitHub Actions. The runner communicates with GitHub’s API endpoints to:
+
+Register and authenticate the runner with the GitHub repository/organization.
+
+Download workflow definitions (YAML files) and related metadata from GitHub.
+
+Fetch source code from GitHub repositories during workflow execution.
+
+Send job status, logs, and artifacts back to GitHub Actions for tracking and visibility in the GitHub UI.
