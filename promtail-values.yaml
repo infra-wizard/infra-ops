@@ -1,0 +1,4 @@
+image:
+  registry: docker.io
+  repository: grafana/promtail
+  tag: ""
