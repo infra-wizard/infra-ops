@@ -18,11 +18,10 @@ jobs:
     
     - name: Download and install NAnt 0.92
       run: |
-        Invoke-WebRequest -Uri "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download" -OutFile "nant.zip"
-        Expand-Archive -Path "nant.zip" -DestinationPath "nant"
-        echo "${{ github.workspace }}\nant\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      shell: powershell
-    
-    - name: Run NAnt build
-      run: nant.exe
-      working-directory: ${{ github.workspace }}
+        $url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
+        $output = "nant.zip"
+        Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
+        Expand-Archive -Path $output -DestinationPath "nant" -Force
+        $nantPath = Join-Path $env:GITHUB_WORKSPACE "nant\nant-0.92\bin"
+        echo $nantPath >> $env:GITHUB_PATH
+  shell: powershell
