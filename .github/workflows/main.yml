@@ -14,23 +14,60 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Download and install NAnt 0.92
+        shell: powershell
         run: |
-          # The download URL is from SourceForge
+          $ErrorActionPreference = "Stop"
+          
+          # Use direct download link
           $nant_url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
+          $nant_zip = "$env:TEMP\nant.zip"
           $nant_path = "C:\nant"
           
           Write-Host "Downloading NAnt from $nant_url..."
-          Invoke-WebRequest -Uri $nant_url -OutFile nant.zip
+          # Use -MaximumRedirection to follow SourceForge redirects
+          Invoke-WebRequest -Uri $nant_url -OutFile $nant_zip -MaximumRedirection 5 -UseBasicParsing
+          
+          # Verify the file was downloaded
+          if (-not (Test-Path $nant_zip)) {
+            throw "Failed to download NAnt archive"
+          }
+          
+          $fileSize = (Get-Item $nant_zip).Length
+          Write-Host "Downloaded file size: $fileSize bytes"
+          
+          if ($fileSize -lt 1000) {
+            throw "Downloaded file is too small, likely not a valid archive"
+          }
           
           Write-Host "Creating NAnt directory at $nant_path..."
-          New-Item -ItemType Directory -Path $nant_path -Force
+          New-Item -ItemType Directory -Path $nant_path -Force | Out-Null
           
           Write-Host "Expanding NAnt archive..."
-          Expand-Archive -Path nant.zip -DestinationPath $nant_path
+          try {
+            Expand-Archive -Path $nant_zip -DestinationPath $nant_path -Force
+          }
+          catch {
+            Write-Host "Error expanding archive: $_"
+            # Try alternative extraction method using .NET
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($nant_zip, $nant_path)
+          }
           
           Write-Host "Setting environment variable for NAnt..."
-          Add-Content -Path $env:GITHUB_PATH -Value "$nant_path\nant-0.92\bin"
+          $nantBinPath = "$nant_path\nant-0.92\bin"
+          
+          # Verify the bin directory exists
+          if (-not (Test-Path $nantBinPath)) {
+            throw "NAnt bin directory not found at $nantBinPath"
+          }
+          
+          Add-Content -Path $env:GITHUB_PATH -Value $nantBinPath
+          Write-Host "NAnt installation completed successfully"
 
       - name: Verify NAnt installation
         run: nant.exe -version
-    
+      
+      - name: Run NAnt build
+        run: nant.exe
+        # Add your specific build target if needed:
+        # run: nant.exe your-target-name
