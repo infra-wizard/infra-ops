@@ -9,53 +9,28 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
       - name: Download and install NAnt 0.92
         run: |
-          # Use direct SourceForge mirror URL instead of redirect
-          $nant_url = "https://downloads.sourceforge.net/project/nant/nant/0.92/nant-0.92-bin.zip"
+          # The download URL is from SourceForge
+          $nant_url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
           $nant_path = "C:\nant"
-          $zip_file = "nant.zip"
           
           Write-Host "Downloading NAnt from $nant_url..."
-          Invoke-WebRequest -Uri $nant_url -OutFile $zip_file -UseBasicParsing
-          
-          # Verify the download
-          if (-not (Test-Path $zip_file)) {
-            Write-Error "Failed to download NAnt"
-            exit 1
-          }
-          
-          $fileInfo = Get-Item $zip_file
-          Write-Host "Downloaded file size: $($fileInfo.Length) bytes"
-          
-          # Verify it's a valid ZIP file by checking magic number
-          $bytes = [System.IO.File]::ReadAllBytes($zip_file)
-          if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
-            Write-Error "Downloaded file is not a valid ZIP archive"
-            Write-Host "File appears to be HTML redirect page"
-            exit 1
-          }
+          Invoke-WebRequest -Uri $nant_url -OutFile nant.zip
           
           Write-Host "Creating NAnt directory at $nant_path..."
-          New-Item -ItemType Directory -Path $nant_path -Force | Out-Null
+          New-Item -ItemType Directory -Path $nant_path -Force
           
           Write-Host "Expanding NAnt archive..."
-          Expand-Archive -Path $zip_file -DestinationPath $nant_path -Force
-          Write-Host "Archive expanded successfully"
+          Expand-Archive -Path nant.zip -DestinationPath $nant_path
           
           Write-Host "Setting environment variable for NAnt..."
           Add-Content -Path $env:GITHUB_PATH -Value "$nant_path\nant-0.92\bin"
-          
-          Write-Host "NAnt installation completed"
-        shell: pwsh
-      
+
       - name: Verify NAnt installation
-        run: |
-          Write-Host "Verifying NAnt installation..."
-          nant -version
-        shell: pwsh
+        run: nant.exe -version
+    
