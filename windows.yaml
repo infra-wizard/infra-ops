@@ -1,29 +1,35 @@
-name: Build with NAnt
+name: NAnt Build Workflow
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches:
+      - main
+      - feature/*
 
 jobs:
   build:
-    runs-on: windows-latest
-    
+    runs-on: windows-agent
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Setup .NET Framework
-      uses: microsoft/setup-msbuild@v1
-    
-    - name: Download and install NAnt 0.92
-  run: |
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download" -OutFile "nant.zip" -UseBasicParsing
-    Expand-Archive -Path "nant.zip" -DestinationPath "." -Force
-    Add-Content $env:GITHUB_PATH "$pwd\nant-0.92\bin"
-  shell: powershell
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download and install NAnt 0.92
+        run: |
+          # The download URL is from SourceForge
+          $nant_url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
+          $nant_path = "C:\nant"
+          
+          Write-Host "Downloading NAnt from $nant_url..."
+          Invoke-WebRequest -Uri $nant_url -OutFile nant.zip
+          
+          Write-Host "Creating NAnt directory at $nant_path..."
+          New-Item -ItemType Directory -Path $nant_path -Force
+          
+          Write-Host "Expanding NAnt archive..."
+          Expand-Archive -Path nant.zip -DestinationPath $nant_path
+          
+          Write-Host "Setting environment variable for NAnt..."
+          Add-Content -Path $env:GITHUB_PATH -Value "$nant_path\nant-0.92\bin"
 
-- name: Check NAnt version
-  run: nant.exe -version
-  shell: powershell
+      - name: Verify NAnt installation
+        run: nant -version
