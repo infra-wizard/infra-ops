@@ -16,14 +16,13 @@ jobs:
       
       - name: Download and install NAnt 0.92
         run: |
-          # The download URL is from SourceForge
-          $nant_url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
+          # Use direct SourceForge mirror URL instead of redirect
+          $nant_url = "https://downloads.sourceforge.net/project/nant/nant/0.92/nant-0.92-bin.zip"
           $nant_path = "C:\nant"
           $zip_file = "nant.zip"
           
           Write-Host "Downloading NAnt from $nant_url..."
-          # Add parameters to handle SourceForge redirects properly
-          Invoke-WebRequest -Uri $nant_url -OutFile $zip_file -UseBasicParsing -MaximumRedirection 5
+          Invoke-WebRequest -Uri $nant_url -OutFile $zip_file -UseBasicParsing
           
           # Verify the download
           if (-not (Test-Path $zip_file)) {
@@ -38,7 +37,7 @@ jobs:
           $bytes = [System.IO.File]::ReadAllBytes($zip_file)
           if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
             Write-Error "Downloaded file is not a valid ZIP archive"
-            Write-Host "First few bytes: $($bytes[0..10] -join ' ')"
+            Write-Host "File appears to be HTML redirect page"
             exit 1
           }
           
@@ -46,13 +45,8 @@ jobs:
           New-Item -ItemType Directory -Path $nant_path -Force | Out-Null
           
           Write-Host "Expanding NAnt archive..."
-          try {
-            Expand-Archive -Path $zip_file -DestinationPath $nant_path -Force
-            Write-Host "Archive expanded successfully"
-          } catch {
-            Write-Error "Failed to expand archive: $_"
-            exit 1
-          }
+          Expand-Archive -Path $zip_file -DestinationPath $nant_path -Force
+          Write-Host "Archive expanded successfully"
           
           Write-Host "Setting environment variable for NAnt..."
           Add-Content -Path $env:GITHUB_PATH -Value "$nant_path\nant-0.92\bin"
