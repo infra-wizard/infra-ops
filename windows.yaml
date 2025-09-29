@@ -17,11 +17,13 @@ jobs:
       uses: microsoft/setup-msbuild@v1
     
     - name: Download and install NAnt 0.92
-      run: |
-        $url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
-        $output = "nant.zip"
-        Invoke-WebRequest -Uri $url -OutFile $output -UseBasicParsing
-        Expand-Archive -Path $output -DestinationPath "nant" -Force
-        $nantPath = Join-Path $env:GITHUB_WORKSPACE "nant\nant-0.92\bin"
-        echo $nantPath >> $env:GITHUB_PATH
+  run: |
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download" -OutFile "nant.zip" -UseBasicParsing
+    Expand-Archive -Path "nant.zip" -DestinationPath "." -Force
+    Add-Content $env:GITHUB_PATH "$pwd\nant-0.92\bin"
+  shell: powershell
+
+- name: Check NAnt version
+  run: nant.exe -version
   shell: powershell
