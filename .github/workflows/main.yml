@@ -1,0 +1,35 @@
+name: NAnt Build Workflow
+
+on:
+  push:
+    branches:
+      - main
+      - feature/*
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download and install NAnt 0.92
+        run: |
+          # The download URL is from SourceForge
+          $nant_url = "https://sourceforge.net/projects/nant/files/nant/0.92/nant-0.92-bin.zip/download"
+          $nant_path = "C:\nant"
+          
+          Write-Host "Downloading NAnt from $nant_url..."
+          Invoke-WebRequest -Uri $nant_url -OutFile nant.zip
+          
+          Write-Host "Creating NAnt directory at $nant_path..."
+          New-Item -ItemType Directory -Path $nant_path -Force
+          
+          Write-Host "Expanding NAnt archive..."
+          Expand-Archive -Path nant.zip -DestinationPath $nant_path
+          
+          Write-Host "Setting environment variable for NAnt..."
+          Add-Content -Path $env:GITHUB_PATH -Value "$nant_path\nant-0.92\bin"
+
+      - name: Verify NAnt installation
+        run: nant -version
