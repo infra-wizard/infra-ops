@@ -1,6 +1,9 @@
 ssh-keygen -t ed25519 -C "your_email@example.com" -f ~/.ssh/id_ed25519_github
 
 
-ssh -i ~/.ssh/id_ecdsa_github \
-    -o UserKnownHostsFile=~/.ssh/known_hosts \
-    -T git@github.com
+# GitHub - Use ishakeel_polaris account
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile ~/.ssh/id_ed25519_github
+    IdentitiesOnly yes
