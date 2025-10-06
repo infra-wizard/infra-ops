@@ -8,13 +8,13 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
       - name: Download and install NAnt 0.92
-        shell: powershell
+        shell: pwsh -ExecutionPolicy Bypass -Command {0}
         run: |
           $ErrorActionPreference = "Stop"
           
