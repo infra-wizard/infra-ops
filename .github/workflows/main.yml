@@ -87,7 +87,7 @@ jobs:
           Remove-Item $nant_zip -Force -ErrorAction SilentlyContinue
 
       - name: Verify NAnt installation
-        run: nant.exe -version
+        run: nant.exe -help
       
       - name: Run NAnt build
         run: nant.exe
