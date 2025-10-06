@@ -87,9 +87,9 @@ jobs:
           Remove-Item $nant_zip -Force -ErrorAction SilentlyContinue
 
       - name: Verify NAnt installation
+        shell: powershell -ExecutionPolicy Bypass -Command {0}
         run: nant.exe -help
       
       - name: Run NAnt build
+        shell: powershell -ExecutionPolicy Bypass -Command {0}
         run: nant.exe
-        # Add your specific build target if needed:
-        # run: nant.exe your-target-name
