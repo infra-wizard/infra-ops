@@ -1,9 +1,7 @@
-- name: Setup SSH
-  uses: webfactory/ssh-agent@v0.8.0
-  with:
-    ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-- name: Add GitHub to known hosts
+- name: Debug SSH Key
   run: |
-    mkdir -p ~/.ssh
-    ssh-keyscan github.com >> ~/.ssh/known_hosts
+    echo "Key loaded:"
+    ssh-add -L
+    echo "---"
+    echo "Testing connection:"
+    ssh -T git@github.com 2>&1 || true
