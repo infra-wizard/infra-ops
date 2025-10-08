@@ -1,101 +1,19 @@
-name: parshall-esw-bsp-ci-cd
+- name: Archive Executable Artifacts
+  uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: Executable
+    path: |
+      **/ALQAgentExecutable*.zip
+    retention-days: 30
+    if-no-files-found: warn
 
-on:
-  workflow_dispatch:
-    inputs:
-      run_preflight:
-        description: 'Run pre-flight checks'
-        required: false
-        default: true
-        type: boolean
-      build_yocto_kirkstone:
-        description: 'Build Yocto IMX Kirkstone'
-        required: false
-        default: true
-        type: boolean
-      retention_days:
-        description: 'Artifact retention days'
-        required: false
-        default: '30'
-        type: choice
-        options:
-          - '7'
-          - '30'
-          - '60'
-          - '90'
-
-jobs:
-  PreFlightCheck:
-    name: Pre-Flight Checks
-    runs-on: ReleaseRunner1
-    if: ${{ inputs.run_preflight == true }}
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      
-      - name: Add GitHub to known hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-      
-      - name: Test SSH Connection
-        run: |
-          ssh -T git@github.com 2>&1 || true
-      
-      - name: Test git & Docker Connectivity
-        run: |
-          docker system info
-          git diff --check
-          ./script/test-connectivity.bash
-      
-      - name: Clean
-        run: |
-          ./script/setup-git-clean.bash
-
-  yocto-imx-kirkstone:
-    name: Build Yocto IMX Kirkstone
-    runs-on: ReleaseRunner1
-    needs: PreFlightCheck
-    # Run if build is enabled AND (preflight passed OR preflight was skipped)
-    if: |
-      always() &&
-      inputs.build_yocto_kirkstone == true &&
-      (needs.PreFlightCheck.result == 'success' || needs.PreFlightCheck.result == 'skipped')
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-      
-      - name: Add GitHub to known hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
-      
-      - name: Build with Kas
-        run: |
-          sh './projects/yocto-imx-kirkstone/script/cibuild-docker-kas-imx.bash'
-      
-      - name: Archive Build Artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: yocto-imx-build-${{ github.run_number }}
-          path: |
-            yocto-imx/build/tmp/deploy/images/*/*.raucb
-            yocto-imx/build/tmp/deploy/images/*/*.rootfs.manifest
-            yocto-imx/build/tmp/deploy/images/*/*.rootfs.tar.*
-            yocto-imx/build/tmp/deploy/images/*/*.testdata.json
-            yocto-imx/build/tmp/deploy/images/*/Image-*
-            yocto-imx/build/tmp/deploy/images/*/imx-boot-*bin*
-            yocto-imx/build/tmp/deploy/images/*/*.zip
-            yocto-imx/build/tmp/deploy/sdk/**
-          retention-days: ${{ fromJSON(inputs.retention_days || '30') }}
-          follow-symlinks: false
-          if-no-files-found: warn
+- name: Archive Source Artifacts
+  uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: Source
+    path: |
+      **/ALQAgentSource*.zip
+    retention-days: 30
+    if-no-files-found: warn
