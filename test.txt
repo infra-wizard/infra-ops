@@ -1,7 +1,19 @@
-- name: Debug SSH Key
-  run: |
-    echo "Key loaded:"
-    ssh-add -L
-    echo "---"
-    echo "Testing connection:"
-    ssh -T git@github.com 2>&1 || true
+# Archive all build artifacts - matches your Jenkins config exactly
+      - name: Archive All Build Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload even on failure (onlyIfSuccessful: false)
+        with:
+          name: yocto-imx-build-${{ github.run_number }}
+          path: |
+            yocto-imx/build/tmp/deploy/images/*/*.raucb
+            yocto-imx/build/tmp/deploy/images/*/*.rootfs.manifest
+            yocto-imx/build/tmp/deploy/images/*/*.rootfs.tar.*
+            yocto-imx/build/tmp/deploy/images/*/*.testdata.json
+            yocto-imx/build/tmp/deploy/images/*/Image-*
+            yocto-imx/build/tmp/deploy/images/*/imx-boot-*bin*
+            yocto-imx/build/tmp/deploy/images/*/*.zip
+            yocto-imx/build/tmp/deploy/sdk/**
+          retention-days: 30
+          follow-symlinks: false  # Matches followSymlinks: false
+          if-no-files-found: warn
+  
