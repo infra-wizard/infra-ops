@@ -1,19 +1,62 @@
-- name: Archive Executable Artifacts
-  uses: actions/upload-artifact@v4
-  if: always()
-  with:
-    name: Executable
-    path: |
-      **/ALQAgentExecutable*.zip
-    retention-days: 30
-    if-no-files-found: warn
+---
+# ArgoCD Application
+# Apply this to create the ArgoCD app
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: azure-secrets
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/your-org/your-repo.git
+    targetRevision: main
+    path: k8s/azure-secrets
+    helm:
+      parameters:
+      - name: azure.clientId
+        value: ""
+      - name: azure.clientSecret
+        value: ""
+      - name: azure.tenantId
+        value: ""
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
 
-- name: Archive Source Artifacts
-  uses: actions/upload-artifact@v4
-  if: always()
-  with:
-    name: Source
-    path: |
-      **/ALQAgentSource*.zip
-    retention-days: 30
-    if-no-files-found: warn
+---
+# Chart.yaml
+# Store this in your Git repo at: k8s/azure-secrets/Chart.yaml
+apiVersion: v2
+name: azure-secrets
+description: Azure credentials secret
+type: application
+version: 1.0.0
+
+---
+# values.yaml
+# Store this in your Git repo at: k8s/azure-secrets/values.yaml
+azure:
+  clientId: "OVERRIDE_IN_ARGOCD_UI"
+  clientSecret: "OVERRIDE_IN_ARGOCD_UI"
+  tenantId: "OVERRIDE_IN_ARGOCD_UI"
+
+---
+# templates/secret.yaml
+# Store this in your Git repo at: k8s/azure-secrets/templates/secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: azure-credentials
+  namespace: default
+type: Opaque
+stringData:
+  AZURE_CLIENT_ID: {{ .Values.azure.clientId | quote }}
+  AZURE_CLIENT_SECRET: {{ .Values.azure.clientSecret | quote }}
+  AZURE_TENANT_ID: {{ .Values.azure.tenantId | quote }}
