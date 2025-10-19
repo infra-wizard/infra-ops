@@ -1,3 +1,10 @@
-RUN --mount=type=ssh \
-    mkdir -p ~/.ssh && \
+--build-arg SSH_PRIVATE_KEY="${{ secrets.SSH_PRIVATE_KEY }}"
+
+
+ARG SSH_PRIVATE_KEY
+
+
+RUN mkdir -p ~/.ssh && \
+    echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa && \
+    chmod 600 ~/.ssh/id_rsa && \
     ssh-keyscan github.com >> ~/.ssh/known_hosts
