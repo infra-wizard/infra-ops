@@ -1,0 +1,94 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: multi-service-apps
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - service: auth-service
+        namespace: production
+        replicaCount: "3"
+        imageTag: "v1.2.3"
+        helmPath: helm-charts/auth-service
+        
+      - service: api-gateway
+        namespace: production
+        replicaCount: "2"
+        imageTag: "v2.0.1"
+        helmPath: helm-charts/api-gateway
+        
+      - service: user-service
+        namespace: production
+        replicaCount: "3"
+        imageTag: "v1.5.0"
+        helmPath: helm-charts/user-service
+        
+      - service: payment-service
+        namespace: production
+        replicaCount: "4"
+        imageTag: "v3.1.2"
+        helmPath: helm-charts/payment-service
+        
+      - service: notification-service
+        namespace: production
+        replicaCount: "2"
+        imageTag: "v1.0.5"
+        helmPath: helm-charts/notification-service
+        
+      - service: order-service
+        namespace: production
+        replicaCount: "3"
+        imageTag: "v2.3.1"
+        helmPath: helm-charts/order-service
+        
+      - service: inventory-service
+        namespace: production
+        replicaCount: "2"
+        imageTag: "v1.8.0"
+        helmPath: helm-charts/inventory-service
+        
+      - service: analytics-service
+        namespace: production
+        replicaCount: "2"
+        imageTag: "v1.3.4"
+        helmPath: helm-charts/analytics-service
+        
+      - service: logging-service
+        namespace: production
+        replicaCount: "3"
+        imageTag: "v2.1.0"
+        helmPath: helm-charts/logging-service
+  
+  template:
+    metadata:
+      name: '{{service}}'
+      labels:
+        service: '{{service}}'
+    spec:
+      project: default
+      
+      source:
+        repoURL: https://github.com/your-org/your-repo.git
+        targetRevision: HEAD
+        path: '{{helmPath}}'
+        
+        helm:
+          releaseName: '{{service}}'
+          parameters:
+            - name: replicaCount
+              value: '{{replicaCount}}'
+            - name: image.tag
+              value: '{{imageTag}}'
+      
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
