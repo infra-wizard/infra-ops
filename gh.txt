@@ -1,10 +1,55 @@
---build-arg SSH_PRIVATE_KEY="${{ secrets.SSH_PRIVATE_KEY }}"
+name: Build Workflow
 
+on:
+  workflow_dispatch:
+    inputs:
+      CI_INPUT_C:
+        description: 'Hint for which CICD stages should run'
+        required: true
+        type: choice
+        default: 'default'
+        options:
+          - 'default'
+          - 'develop'
+          - 'main'
+          - 'release/'
+          - 'ci/docker-esw-a35-sdk/'
+          - 'ci/docker-esw/'
+          - 'ci/docker-nginx-yocto/'
+          - 'ci/imx-linux-kirkstone/'
+          - 'ci/parshall-a35/'
+          - 'ci/parshall-mfg/'
+          - 'ci/yocto-imx-kirkstone/'
+          - 'ci/yocto-imx/'
 
-ARG SSH_PRIVATE_KEY
-
-
-RUN mkdir -p ~/.ssh && \
-    echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa && \
-    chmod 600 ~/.ssh/id_rsa && \
-    ssh-keyscan github.com >> ~/.ssh/known_hosts
+jobs:
+  yocto-imx-kirkstone:
+    runs-on: ReleaseRunner1
+    # Use the choice input in conditions
+    if: |
+      always() &&
+      (inputs.CI_INPUT_C == 'default' || 
+       inputs.CI_INPUT_C == 'ci/yocto-imx-kirkstone/') &&
+      inputs.build_yocto_kirkstone == true
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      
+      - name: Build
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "Running with CI_INPUT_C: ${{ inputs.CI_INPUT_C }}"
+          ./projects/docker-esw/script/cibuild
+          docker tag appareolinuxsdk.azurecr.io/parshall/parshall-yocto:latest-u1001 parshall-yocto:latest
+          ./projects/yocto-imx-kirkstone/script/cibuild-docker-kas-imx.bash
