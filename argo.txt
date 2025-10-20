@@ -1,0 +1,129 @@
+# argocd-apps/config/api.yaml (in dev branch)
+serviceName: api
+namespace: api
+chartPath: helm-charts/api
+replicaCount: "2"
+imageTag: v1.0.0-dev
+imagePullPolicy: Always
+serviceType: ClusterIP
+ingressEnabled: "true"
+ingressHost: api-dev.mycompany.com
+certIssuer: letsencrypt-staging
+envName: development
+logLevel: debug
+databaseHost: postgres-api.dev.svc.cluster.local
+redisHost: redis-api.dev.svc.cluster.local
+apiUrl: http://api.dev.svc.cluster.local
+cpuLimit: 200m
+memoryLimit: 256Mi
+cpuRequest: 100m
+memoryRequest: 128Mi
+autoscalingEnabled: "false"
+minReplicas: "2"
+maxReplicas: "5"
+monitoringEnabled: "true"
+selfHeal: "true"
+
+---
+# argocd-apps/config/worker.yaml (in dev branch)
+serviceName: worker
+namespace: worker
+chartPath: helm-charts/worker
+replicaCount: "2"
+imageTag: v1.0.0-dev
+imagePullPolicy: Always
+serviceType: ClusterIP
+ingressEnabled: "false"
+ingressHost: ""
+certIssuer: ""
+envName: development
+logLevel: debug
+databaseHost: postgres-worker.dev.svc.cluster.local
+redisHost: redis-worker.dev.svc.cluster.local
+queueUrl: redis://redis-worker.dev.svc.cluster.local:6379
+cpuLimit: 300m
+memoryLimit: 512Mi
+cpuRequest: 150m
+memoryRequest: 256Mi
+autoscalingEnabled: "true"
+minReplicas: "2"
+maxReplicas: "8"
+monitoringEnabled: "true"
+selfHeal: "true"
+
+---
+# argocd-apps/config/frontend.yaml (in dev branch)
+serviceName: frontend
+namespace: frontend
+chartPath: helm-charts/frontend
+replicaCount: "2"
+imageTag: v1.0.0-dev
+imagePullPolicy: Always
+serviceType: ClusterIP
+ingressEnabled: "true"
+ingressHost: dev.mycompany.com
+certIssuer: letsencrypt-staging
+envName: development
+logLevel: debug
+apiUrl: http://api.dev.svc.cluster.local
+backendUrl: http://api-dev.mycompany.com
+cpuLimit: 150m
+memoryLimit: 256Mi
+cpuRequest: 75m
+memoryRequest: 128Mi
+autoscalingEnabled: "false"
+minReplicas: "2"
+maxReplicas: "5"
+monitoringEnabled: "true"
+selfHeal: "true"
+
+---
+# argocd-apps/applicationset.yaml (in dev branch)
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: all-services-dev
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  
+  generators:
+  - git:
+      repoURL: https://github.com/your-org/your-repo.git
+      revision: dev  # Points to dev branch
+      files:
+      - path: "argocd-apps/config/*.yaml"
+  
+  template:
+    metadata:
+      name: '{{.serviceName}}'
+      labels:
+        app: '{{.serviceName}}'
+        environment: dev
+        managed-by: argocd
+      annotations:
+        notifications.argoproj.io/subscribe.on-sync-succeeded.slack: dev-deployments
+        notifications.argoproj.io/subscribe.on-sync-failed.slack: dev-alerts
+    spec:
+      project: default
+      
+      source:
+        repoURL: https://github.com/your-org/your-repo.git
+        targetRevision: dev  # Same branch
+        path: '{{.chartPath}}'
+        
+        helm:
+          releaseName: '{{.serviceName}}'
+          
+          parameters:
+            - name: replicaCount
+              value: '{{.replicaCount}}'
+            - name: image.repository
+              value: 'myregistry/{{.serviceName}}'
+            - name: image.tag
+              value: '{{.imageTag}}'
+            - name: image.pullPolicy
+              value: '{{.imagePullPolicy}}'
