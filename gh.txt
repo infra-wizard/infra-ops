@@ -1,4 +1,171 @@
-# Yocto IMX stage
+name: Build Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      CI_INPUT_C:
+        description: 'Hint for which CICD stages should run'
+        required: true
+        type: choice
+        default: 'default'
+        options:
+          - 'default'
+          - 'develop'
+          - 'main'
+          - 'release/'
+          - 'ci/docker-esw-a35-sdk/'
+          - 'ci/docker-esw/'
+          - 'ci/docker-nginx-yocto/'
+          - 'ci/imx-linux-kirkstone/'
+          - 'ci/parshall-a35/'
+          - 'ci/parshall-mfg/'
+          - 'ci/yocto-imx-kirkstone/'
+          - 'ci/yocto-imx/'
+      
+      build_yocto_kirkstone:
+        description: 'Build Yocto Kirkstone'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  PreFlightCheck:
+    runs-on: ReleaseRunner1
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      
+      - name: Test git & Docker Connectivity
+        run: |
+          docker system info
+          git diff --check
+          ./script/test-connectivity.bash
+      
+      - name: Clean
+        run: |
+          ./script/setup-git-clean.bash
+
+  # Parallel stage 1: docker-esw
+  docker-esw:
+    runs-on: ReleaseRunner1
+    needs: PreFlightCheck
+    if: |
+      always() &&
+      (needs.PreFlightCheck.result == 'success') &&
+      (github.ref == 'refs/heads/ci/docker-esw' ||
+       github.ref == 'refs/heads/develop' ||
+       inputs.CI_INPUT_C == 'ci/docker-esw/' ||
+       inputs.CI_INPUT_C == 'develop' ||
+       inputs.CI_INPUT_C == 'release/' ||
+       contains(github.event.head_commit.modified, 'projects/docker-esw/'))
+    
+    env:
+      AZ_SP: ${{ secrets.ACR_LINUXSDK }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      
+      - name: Build docker-esw
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          ./projects/docker-esw/script/cibuild
+        continue-on-error: true
+
+  # Parallel stage 2: docker-esw-a35-sdk
+  docker-esw-a35-sdk:
+    runs-on: ReleaseRunner1
+    needs: PreFlightCheck
+    if: |
+      always() &&
+      (needs.PreFlightCheck.result == 'success') &&
+      (github.ref == 'refs/heads/ci/docker-esw-a35-sdk' ||
+       github.ref == 'refs/heads/develop' ||
+       inputs.CI_INPUT_C == 'ci/docker-esw-a35-sdk/' ||
+       inputs.CI_INPUT_C == 'develop' ||
+       inputs.CI_INPUT_C == 'release/' ||
+       contains(github.event.head_commit.modified, 'utils/docker-esw-a35-sdk/'))
+    
+    env:
+      AZ_SP: ${{ secrets.ACR_LINUXSDK }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      
+      - name: Build docker-esw-a35-sdk
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          ./utils/docker-esw-a35-sdk/script/cibuild
+        continue-on-error: true
+
+  # Parallel stage 3: docker-nginx-yocto
+  docker-nginx-yocto:
+    runs-on: ReleaseRunner1
+    needs: PreFlightCheck
+    if: |
+      always() &&
+      (needs.PreFlightCheck.result == 'success') &&
+      (github.ref == 'refs/heads/ci/docker-nginx-yocto' ||
+       github.ref == 'refs/heads/develop' ||
+       inputs.CI_INPUT_C == 'ci/docker-nginx-yocto/' ||
+       inputs.CI_INPUT_C == 'develop' ||
+       inputs.CI_INPUT_C == 'release/' ||
+       contains(github.event.head_commit.modified, 'utils/docker-nginx-yocto/'))
+    
+    env:
+      AZ_SP: ${{ secrets.ACR_LINUXSDK }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: Add GitHub to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+      
+      - name: Build docker-nginx-yocto
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          ./utils/docker-nginx-yocto/script/cibuild
+        continue-on-error: true
+
+  # Yocto IMX stage (from previous response)
   yocto-imx:
     runs-on: ReleaseRunner1
     needs: PreFlightCheck
