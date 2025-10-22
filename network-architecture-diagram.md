@@ -5,7 +5,7 @@ This diagram illustrates how internal users access applications hosted within mu
 ## Architecture Overview
 
 ```mermaid
-graph TB
+graph LR
     subgraph "INTERNAL USERS"
         UW[User Workstation]
     end
@@ -53,24 +53,24 @@ graph TB
     DNS1 -->|return Ingress IP| UW
     DNS2 -->|return Ingress IP| UW
     
-    %% Application Access Flow
-    UW -->|access via internal domain| GRAFANA2
-    UW -->|access via internal domain| PROMETHEUS2
-    UW -->|access via internal domain| ARGOCD2
+    %% Application Access Flow - curved arrows to match original
+    UW -.->|access via internal domain| GRAFANA2
+    UW -.->|access via internal domain| PROMETHEUS2
+    UW -.->|access via internal domain| ARGOCD2
     
-    UW -->|access via internal domain| GRAFANA3
-    UW -->|access via internal domain| PROMETHEUS3
-    UW -->|access via internal domain| ARGOCD3
+    UW -.->|access via internal domain| GRAFANA3
+    UW -.->|access via internal domain| PROMETHEUS3
+    UW -.->|access via internal domain| ARGOCD3
     
-    UW -->|access via internal domain| GRAFANA4
-    UW -->|access via internal domain| PROMETHEUS4
-    UW -->|access via internal domain| ARGOCD4
+    UW -.->|access via internal domain| GRAFANA4
+    UW -.->|access via internal domain| PROMETHEUS4
+    UW -.->|access via internal domain| ARGOCD4
     
-    UW -->|access via internal domain| GRAFANA1
-    UW -->|access via internal domain| PROMETHEUS1
-    UW -->|access via internal domain| ARGOCD1
+    UW -.->|access via internal domain| GRAFANA1
+    UW -.->|access via internal domain| PROMETHEUS1
+    UW -.->|access via internal domain| ARGOCD1
     
-    %% Styling
+    %% Styling to match original colors
     classDef userBox fill:#f9f9f9,stroke:#8B4513,stroke-width:3px
     classDef dnsBox fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
     classDef clusterBox fill:#f3e5f5,stroke:#7b1fa2,stroke-width:3px
