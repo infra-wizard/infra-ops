@@ -10,3 +10,29 @@ spec:
         value: $app-secrets-k8s:database-url
       - name: api.key
         value: $app-secrets-k8s:api-key
+
+
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-secret
+  namespace: default
+type: Opaque
+data:
+  data: ZXhhbXBsZS1kYXRhLXZhbHVl
+  repo: aHR0cHM6Ly9naXRodWIuY29tL2V4YW1wbGUvcmVwby5naXQ=
+
+----
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: my-app
+spec:
+  source:
+    helm:
+      parameters:
+      - name: database.url
+        value: $my-secret:data
+      - name: api.key
+        value: $my-secret:repo
