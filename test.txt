@@ -1,17 +1,22 @@
-helm repo add emberstack https://emberstack.github.io/helm-charts
-helm repo update
-helm install reflector emberstack/reflector --namespace infra --create-namespace
-
----
-
-apiVersion: v1
-kind: ConfigMap
+apiVersion: argoproj.io/v1alpha1
+kind: Application
 metadata:
-  name: common-settings
-  namespace: shared-config
-  annotations:
-    reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
-    reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: "app-dev,app-qa,app-prod"
-data:
-  LOG_LEVEL: info
-  FEATURE_FLAG: "true"
+  name: my-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://your-repo.git
+    targetRevision: HEAD
+    path: charts/my-app
+    helm:
+      valuesObject:
+        secrets:
+          valueFrom:
+            secretKeyRef:
+              name: my-argocd-secret
+              key: my-key
+              namespace: argocd
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: adap
