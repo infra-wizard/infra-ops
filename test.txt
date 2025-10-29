@@ -1,3 +1,21 @@
 helm repo add emberstack https://emberstack.github.io/helm-charts
 helm repo update
 helm install reflector emberstack/reflector --namespace infra --create-namespace
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: common-settings
+  namespace: default
+  annotations:
+   reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
+   reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: argocd
+   reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
+   reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: argocd
+data:
+  LOG_LEVEL: info
+  FEATURE_FLAG: "true"
+~                                                                                                                                                                                                                     
+~                                 
