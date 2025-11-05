@@ -1,0 +1,58 @@
+template:
+  spec:
+    serviceAccountName: "io-service-account"
+    
+    containers:
+    - name: runner
+      image: ghcr.io/actions/actions-runner:latest
+      command: 
+      - bash
+      - -c
+      - |
+        echo "Waiting for Docker daemon to be ready..."
+        for i in {1..60}; do
+          if docker info >/dev/null 2>&1; then
+            echo "Docker is ready!"
+            docker --version
+            break
+          fi
+          echo "Waiting... ($i/60)"
+          sleep 2
+        done
+        
+        if ! docker info >/dev/null 2>&1; then
+          echo "ERROR: Docker daemon not ready"
+          exit 1
+        fi
+        
+        echo "Starting runner..."
+        exec /home/runner/run.sh
+      env:
+      - name: DOCKER_HOST
+        value: tcp://localhost:2375
+      volumeMounts:
+      - name: work
+        mountPath: /home/runner/_work
+      
+    - name: dind
+      image: docker:24-dind
+      securityContext:
+        privileged: true
+      env:
+      - name: DOCKER_TLS_CERTDIR
+        value: ""
+      args:
+      - dockerd
+      - --host=tcp://0.0.0.0:2375
+      - --host=unix:///var/run/docker.sock
+      volumeMounts:
+      - name: work
+        mountPath: /home/runner/_work
+      - name: dind-storage
+        mountPath: /var/lib/docker
+    
+    volumes:
+    - name: work
+      emptyDir: {}
+    - name: dind-storage
+      emptyDir: {}
