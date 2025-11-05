@@ -1,0 +1,47 @@
+# Get ACR ID
+ACR_ID=$(az acr show --name $ACR_NAME --query id --output tsv)
+
+# Create service principal with push permissions
+SP_CREDENTIALS=$(az ad sp create-for-rbac \
+  --name "${ACR_NAME}-push" \
+  --scopes $ACR_ID \
+  --role acrpush \
+  --query "{clientId:appId, clientSecret:password}" \
+  --output json)
+
+echo $SP_CREDENTIALS
+
+
+---
+
+name: Build and Push to ACR
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-push:
+    runs-on: self-hosted  # Use your ARC runner
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Log in to Azure Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.ACR_LOGIN_SERVER }}/your-app:${{ github.sha }}
+          ${{ secrets.ACR_LOGIN_SERVER }}/your-app:latest
