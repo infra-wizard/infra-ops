@@ -68,3 +68,14 @@ az account show --query '{tenantId:tenantId, subscriptionId:id}' --output json
       - name: Login to ACR
         run: |
           az acr login --name <your-acr-name>
+
+- name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/myapp:${{ github.sha }} .
+          docker tag ${{ secrets.ACR_LOGIN_SERVER }}/myapp:${{ github.sha }} \
+                     ${{ secrets.ACR_LOGIN_SERVER }}/myapp:latest
+      
+      - name: Push to ACR
+        run: |
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/myapp:${{ github.sha }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/myapp:latest
