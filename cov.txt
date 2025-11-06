@@ -79,3 +79,8 @@ az account show --query '{tenantId:tenantId, subscriptionId:id}' --output json
         run: |
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/myapp:${{ github.sha }}
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/myapp:latest
+
+
+- name: Install Azure CLI
+        run: |
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
