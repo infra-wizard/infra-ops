@@ -1,0 +1,212 @@
+---
+# Kubernetes Job to execute deploy.sh script
+# This creates all secrets and configmaps before main deployment
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${DEPLOYMENT_NAME}-deploy-script
+  namespace: ${DEPLOYMENT_NAMESPACE}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1000"
+  labels:
+    app.kubernetes.io/name: pre-deployment
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+    deployment-group: pre-setup
+spec:
+  # Don't retry failed jobs automatically - let Argo CD handle it
+  backoffLimit: 2
+  # Clean up completed jobs after 1 hour
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      name: deploy-script
+      labels:
+        app.kubernetes.io/name: pre-deployment
+        app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: ${DEPLOYMENT_NAME}-deploy-sa
+      containers:
+        - name: deploy-script
+          # Use an image that has kubectl, bash, and other tools
+          image: bitnami/kubectl:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              
+              echo "=========================================="
+              echo "Starting Pre-Deployment Setup"
+              echo "Deployment: ${DEPLOYMENT_NAME}"
+              echo "Namespace: ${DEPLOYMENT_NAMESPACE}"
+              echo "=========================================="
+              echo ""
+              
+              # Check if deploy.sh exists
+              if [ ! -f /scripts/deploy.sh ]; then
+                echo "ERROR: deploy.sh not found in /scripts/"
+                exit 1
+              fi
+              
+              # Make script executable
+              chmod +x /scripts/deploy.sh
+              
+              # Execute the deploy.sh script
+              echo "Executing deploy.sh script..."
+              /scripts/deploy.sh
+              
+              EXIT_CODE=$?
+              
+              if [ $EXIT_CODE -eq 0 ]; then
+                echo ""
+                echo "=========================================="
+                echo "Pre-Deployment Setup Completed Successfully"
+                echo "=========================================="
+                exit 0
+              else
+                echo ""
+                echo "=========================================="
+                echo "Pre-Deployment Setup Failed!"
+                echo "Exit Code: $EXIT_CODE"
+                echo "=========================================="
+                exit $EXIT_CODE
+              fi
+          env:
+            - name: DEPLOYMENT_NAME
+              value: "${DEPLOYMENT_NAME}"
+            - name: DEPLOYMENT_NAMESPACE
+              value: "${DEPLOYMENT_NAMESPACE}"
+            - name: KUBECONFIG
+              value: /var/run/secrets/kubernetes.io/serviceaccount/kubeconfig
+          volumeMounts:
+            # Mount the deploy.sh script from ConfigMap or Git repo
+            - name: deploy-scripts
+              mountPath: /scripts
+              readOnly: true
+            # Mount any additional configuration files needed
+            - name: deployment-config
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        # ConfigMap containing deploy.sh script
+        - name: deploy-scripts
+          configMap:
+            name: ${DEPLOYMENT_NAME}-deploy-scripts
+            defaultMode: 0755
+        # Additional configuration
+        - name: deployment-config
+          configMap:
+            name: ${DEPLOYMENT_NAME}-deployment-config
+            optional: true
+
+---
+# ServiceAccount for the deploy job
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${DEPLOYMENT_NAME}-deploy-sa
+  namespace: ${DEPLOYMENT_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: pre-deployment
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+
+---
+# Role with permissions needed by deploy.sh script
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${DEPLOYMENT_NAME}-deploy-role
+  namespace: ${DEPLOYMENT_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: pre-deployment
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+rules:
+  # Permissions to create/manage secrets
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Permissions to create/manage configmaps
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Permissions to create/manage PVCs
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "create", "update", "patch"]
+  # Permissions to read pods (for status checking)
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Permissions for jobs (if deploy.sh creates jobs)
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Add any other resources your deploy.sh script needs to manage
+
+---
+# RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ${DEPLOYMENT_NAME}-deploy-rolebinding
+  namespace: ${DEPLOYMENT_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: pre-deployment
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${DEPLOYMENT_NAME}-deploy-role
+subjects:
+  - kind: ServiceAccount
+    name: ${DEPLOYMENT_NAME}-deploy-sa
+    namespace: ${DEPLOYMENT_NAMESPACE}
+
+---
+# ConfigMap containing the deploy.sh script
+# You should populate this with your actual deploy.sh content
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${DEPLOYMENT_NAME}-deploy-scripts
+  namespace: ${DEPLOYMENT_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: pre-deployment
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+data:
+  deploy.sh: |
+    #!/bin/bash
+    # Your deploy.sh script content goes here
+    # This script should create all secrets and configmaps
+    
+    set -euo pipefail
+    
+    echo "Creating secrets and configmaps..."
+    
+    # Example: Create a secret
+    # kubectl create secret generic my-secret \
+    #   --from-literal=username=admin \
+    #   --from-literal=password=changeme \
+    #   --namespace ${DEPLOYMENT_NAMESPACE} \
+    #   --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Example: Create a configmap
+    # kubectl create configmap my-config \
+    #   --from-literal=key=value \
+    #   --namespace ${DEPLOYMENT_NAMESPACE} \
+    #   --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Add your actual deployment preparation logic here
+    
+    echo "Secrets and configmaps created successfully!"
