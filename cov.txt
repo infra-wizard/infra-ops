@@ -94,3 +94,12 @@ az identity federated-credential create \
   --issuer https://token.actions.githubusercontent.com \
   --subject repo:Mohammed-Asher/aks-cicd-test:ref:refs/heads/* \
   --audiences api://AzureADTokenExchange
+
+
+
+- name: Get ACR token and login
+        run: |
+          # Get access token for ACR
+          TOKEN=$(az acr login --name lumendevpoc --expose-token --output tsv --query accessToken)
+          echo $TOKEN | docker login lumendevpoc.azurecr.io --username 00000000-0000-0000-0000-000000000000 --password-stdin
+      
