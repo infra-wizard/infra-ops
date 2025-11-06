@@ -1,0 +1,47 @@
+# Update package lists
+sudo apt-get update
+
+# Install dependencies from your workflow
+sudo apt-get -y install ninja-build dbus lcov libsystemd-dev libunimd-dev gstreamer1.0
+
+# Install Qt5 (from line 17-21 of your workflow)
+sudo add-apt-repository ppa:beineri/opt-qt-5.15.2-jammy
+sudo apt-get update
+sudo apt-get install qt515-meta-minimal qt515-multimedia qt515-quickcontrols2
+
+# Source Qt environment
+source /opt/qt515/bin/qt515-env.sh
+
+# Install polaris-mapbox-sdk dependencies
+sudo apt-get -y install libgtest-dev qt5-default lcov || true
+
+# Clone and install polaris-mapbox-sdk (from your workflow lines 54-73)
+git clone https://github.com/Trail-Tech/polaris-mapbox-sdk.git
+cd polaris-mapbox-sdk
+
+# Initialize submodules
+git submodule update --init deps/geojson.hpp/
+sudo cp -r -v deps/geojson.hpp/include/mapbox/* /usr/include/mapbox/
+git submodule update --init deps/geometry.hpp/
+sudo cp -r -v deps/geometry.hpp/include/mapbox/* /usr/include/mapbox/
+git submodule update --init deps/variant/
+sudo cp -r -v deps/variant/include/mapbox/* /usr/include/mapbox/
+
+# Build and install polaris-mapbox-sdk
+cd polaris-mapbox-sdk
+cmake -B build -G Ninja -DCMAKE_INSTALL_PREFIX=/usr
+ninja -C build
+sudo ninja -C build install
+
+# Go back to your janus project
+cd /path/to/your/janus/project
+
+# Now you can run your build command
+cmake -B build -G Ninja \
+  -DVENUS_UNIT_TESTING=YES \
+  -DVENUS_PRODUCT=srv-7in \
+  -DVENUS_COMPILED_QML=YES \
+  -DVENUS_EMBEDDED_ASSETS=NO \
+  -DVENUS_QT6=YES
+
+ninja -C build
