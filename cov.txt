@@ -1,3 +1,7 @@
+git clone https://github.com/mapbox/mapbox-base.git
+cd mapbox-base
+git submodule update --init --recursive
+
 # Update package lists
 sudo apt-get update
 
