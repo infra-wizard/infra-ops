@@ -84,3 +84,13 @@ az account show --query '{tenantId:tenantId, subscriptionId:id}' --output json
 - name: Install Azure CLI
         run: |
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+
+
+
+az identity federated-credential create \
+  --name github-all-branches \
+  --identity-name github-acr-identity \
+  --resource-group <your-resource-group> \
+  --issuer https://token.actions.githubusercontent.com \
+  --subject repo:Mohammed-Asher/aks-cicd-test:ref:refs/heads/* \
+  --audiences api://AzureADTokenExchange
