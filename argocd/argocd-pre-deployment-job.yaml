@@ -1,0 +1,42 @@
+---
+# Pre-deployment Job Application
+# This runs deploy.sh script to create secrets and configmaps
+# Must complete successfully before ApplicationSet creates other apps
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${DEPLOYMENT_NAME}-pre-deployment-setup
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1000"
+  labels:
+    deployment-group: pre-setup
+    app.kubernetes.io/instance: ${DEPLOYMENT_NAME}
+spec:
+  project: default
+  source:
+    repoURL: ${GIT_REPOSITORY}
+    targetRevision: ${GIT_BRANCH}
+    path: ${DEPLOYMENT_PATH}
+    directory:
+      recurse: false
+      include: '{deploy-job.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ${DEPLOYMENT_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: false  # Don't self-heal jobs
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        maxDuration: 1m
+  # This job must complete before proceeding
+  syncPolicy:
+    syncOptions:
+      - FailOnSharedResource=false
+      - RespectIgnoreDifferences=true
