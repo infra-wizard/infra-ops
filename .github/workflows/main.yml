@@ -1,40 +1,32 @@
-name: On Branch Creation
+name: Branch Created
 
 on:
   create:
 
 jobs:
-  branch-created:
-    # Only run when a branch is created (not tags)
+  notify-branch-created:
     if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout target branch with workflow
-        uses: actions/checkout@v4
-        with:
-          # Checkout the branch that contains this workflow file
-          ref: main  # Change to your target branch (main, develop, etc.)
-      
-      - name: Get branch information
+      - name: Print branch information
         run: |
-          echo "New branch created: ${{ github.ref_name }}"
+          echo "New branch created!"
+          echo "Branch name: ${{ github.ref_name }}"
           echo "Created by: ${{ github.actor }}"
           echo "Repository: ${{ github.repository }}"
-          echo "Event type: ${{ github.event_name }}"
+          echo "Ref type: ${{ github.ref_type }}"
       
-      - name: Send notification
+      - name: Checkout the newly created branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      
+      - name: Run custom actions
         run: |
-          echo "Branch ${{ github.ref_name }} has been created!"
-          # Add your custom logic here, such as:
-          # - Send Slack/Discord notification
-          # - Create a pull request template
-          # - Run initial tests
-          # - Set up branch protection rules
+          echo "Add your custom logic here"
+          # Examples:
+          # - Send notifications
+          # - Run initialization scripts
+          # - Create PR templates
           # - Notify team members
-      
-      - name: Run custom script (optional)
-        run: |
-          # Add any custom commands you want to run
-          # For example, initialize branch-specific configuration
-          echo "Running custom initialization for branch: ${{ github.ref_name }}"
