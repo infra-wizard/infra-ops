@@ -1,0 +1,288 @@
+# Namespaces where ExternalSecrets will be created
+namespaces:
+  - name: argo-cd
+    # Can add namespace-specific configuration here if needed
+  - name: twx
+    # Can add namespace-specific configuration here if needed
+
+# ExternalSecret configuration
+externalSecret:
+  # Name of the ExternalSecret resource
+  name: thingworx-secrets
+
+  # Name of the target Kubernetes Secret that will be created
+  targetSecretName: thingworx-secrets
+
+  # How often to refresh the secret from the external source
+  refreshInterval: 1h
+
+  # Creation policy for the target secret
+  # Options: Owner, Orphan, Merge, None
+  creationPolicy: Owner
+
+  # Labels to apply to the ExternalSecret resource
+  labels: {}
+  #   app: thingworx
+  #   component: secrets
+
+  # Annotations to apply to the ExternalSecret resource
+  annotations: {}
+  #   argocd.argoproj.io/sync-wave: "-1"
+
+  # Optional template for the target secret
+  # Uncomment to customize the generated secret
+  template: {}
+  #   type: Opaque
+  #   metadata:
+  #     labels:
+  #       app: thingworx
+  #   data:
+  #     custom-key: "{{ .customValue | b64enc }}"
+
+  # List of secrets to fetch from the external secret store
+  data:
+    # AKS Configuration
+    - secretKey: AKS-NS
+      remoteRef:
+        key: AKS-NS
+
+    # Azure Container Registry Configuration
+    - secretKey: ACR-TWX-SERVER
+      remoteRef:
+        key: ACR-TWX-SERVER
+    - secretKey: ACR-TWX-USER
+      remoteRef:
+        key: ACR-TWX-USER
+
+    # AKS Persistent Storage Configuration
+    - secretKey: AKS-PERS-LOCATION
+      remoteRef:
+        key: AKS-PERS-LOCATION
+    - secretKey: AKS-PERS-RESOURCE-GROUP
+      remoteRef:
+        key: AKS-PERS-RESOURCE-GROUP
+    - secretKey: AKS-PERS-SHARE-NAME
+      remoteRef:
+        key: AKS-PERS-SHARE-NAME
+    - secretKey: AKS-PERS-SHARE-NAME-SKUNAME
+      remoteRef:
+        key: AKS-PERS-SHARE-NAME-SKUNAME
+    - secretKey: AKS-PERS-STORAGE-ACCOUNT-NAME
+      remoteRef:
+        key: AKS-PERS-STORAGE-ACCOUNT-NAME
+
+    # AKS File Repository Configuration
+    - secretKey: AKS-FR-RESOURCE-GROUP
+      remoteRef:
+        key: AKS-FR-RESOURCE-GROUP
+    - secretKey: AKS-FR-STORAGE-ACCOUNT-NAME
+      remoteRef:
+        key: AKS-FR-STORAGE-ACCOUNT-NAME
+    - secretKey: AKS-FR-STORAGE-SHARENAME
+      remoteRef:
+        key: AKS-FR-STORAGE-SHARENAME
+    - secretKey: AKS-FR-SHARE-NAME-SKUNAME
+      remoteRef:
+        key: AKS-FR-SHARE-NAME-SKUNAME
+
+    # AKS Monitoring Configuration
+    - secretKey: AKS-MONITORING-STORAGE-ACCOUNT-NAME
+      remoteRef:
+        key: AKS-MONITORING-STORAGE-ACCOUNT-NAME
+    - secretKey: AKS-MONITORING-RESOURCE-GROUP
+      remoteRef:
+        key: AKS-MONITORING-RESOURCE-GROUP
+
+    # Ingress Configuration
+    - secretKey: AKS-TWX-INGRESS-CERT
+      remoteRef:
+        key: AKS-TWX-INGRESS-CERT
+    - secretKey: INGRESS-IP
+      remoteRef:
+        key: INGRESS-IP
+
+    # Thingworx License and Security
+    - secretKey: TWX-LS-KEY
+      remoteRef:
+        key: TWX-LS-KEY
+    - secretKey: SSL-KEYSTORE-PASSWORD
+      remoteRef:
+        key: SSL-KEYSTORE-PASSWORD
+    - secretKey: KEYSTORE-PASSWORD
+      remoteRef:
+        key: KEYSTORE-PASSWORD
+    - secretKey: THINGWORX-INITIAL-ADMIN-PASSWORD
+      remoteRef:
+        key: THINGWORX-INITIAL-ADMIN-PASSWORD
+
+    # Tomcat Configuration
+    - secretKey: TOMCAT-CLIENT-PASSWORD
+      remoteRef:
+        key: TOMCAT-CLIENT-PASSWORD
+    - secretKey: TOMCAT-TRUSTSTORE-PASSWORD
+      remoteRef:
+        key: TOMCAT-TRUSTSTORE-PASSWORD
+
+    # Thingworx Application Configuration
+    - secretKey: TWX-EMS-URL
+      remoteRef:
+        key: TWX-EMS-URL
+    - secretKey: TWX-ENABLE-CONSOLE-OUTPUT
+      remoteRef:
+        key: TWX-ENABLE-CONSOLE-OUTPUT
+    - secretKey: TWX-ENABLE-CLUSTERED-MODE
+      remoteRef:
+        key: TWX-ENABLE-CLUSTERED-MODE
+    - secretKey: TWX-SECRET-PROVISIONING-APP-KEY
+      remoteRef:
+        key: TWX-SECRET-PROVISIONING-APP-KEY
+    - secretKey: TWX-PLATFORM-ID
+      remoteRef:
+        key: TWX-PLATFORM-ID
+    - secretKey: TWX-POOL-NAME
+      remoteRef:
+        key: TWX-POOL-NAME
+
+    # Thingworx Scaling Configuration
+    - secretKey: TWX-REPLICA-COUNT
+      remoteRef:
+        key: TWX-REPLICA-COUNT
+    - secretKey: TWX-CPU-REQUEST
+      remoteRef:
+        key: TWX-CPU-REQUEST
+    - secretKey: TWX-CPU-LIMIT
+      remoteRef:
+        key: TWX-CPU-LIMIT
+    - secretKey: TWX-MEMORY-REQUEST
+      remoteRef:
+        key: TWX-MEMORY-REQUEST
+    - secretKey: TWX-MEMORY-LIMIT
+      remoteRef:
+        key: TWX-MEMORY-LIMIT
+    - secretKey: TWX-CATALINA-OPTS
+      remoteRef:
+        key: TWX-CATALINA-OPTS
+
+    # eMessage Configuration
+    - secretKey: EMG-REPLICA-COUNT
+      remoteRef:
+        key: EMG-REPLICA-COUNT
+    - secretKey: EMESSAGE-POOL-NAME
+      remoteRef:
+        key: EMESSAGE-POOL-NAME
+    - secretKey: EMG-CPU-REQUEST
+      remoteRef:
+        key: EMG-CPU-REQUEST
+    - secretKey: EMG-CPU-LIMIT
+      remoteRef:
+        key: EMG-CPU-LIMIT
+    - secretKey: EMG-MEMORY-REQUEST
+      remoteRef:
+        key: EMG-MEMORY-REQUEST
+    - secretKey: EMG-MEMORY-LIMIT
+      remoteRef:
+        key: EMG-MEMORY-LIMIT
+    - secretKey: EMG-CATALINA-OPTS
+      remoteRef:
+        key: EMG-CATALINA-OPTS
+
+    # Database Configuration
+    - secretKey: TWX-DATA-DATABASE-USERNAME
+      remoteRef:
+        key: TWX-DATA-DATABASE-USERNAME
+    - secretKey: TWX-DATA-DATABASE-PASSWORD
+      remoteRef:
+        key: TWX-DATA-DATABASE-PASSWORD
+    - secretKey: TWX-DATABASE-USERNAME
+      remoteRef:
+        key: TWX-DATABASE-USERNAME
+    - secretKey: TWX-DATABASE-PASSWORD
+      remoteRef:
+        key: TWX-DATABASE-PASSWORD
+    - secretKey: DATABASE-HOST
+      remoteRef:
+        key: DATABASE-HOST
+    - secretKey: DATABASE-PORT
+      remoteRef:
+        key: DATABASE-PORT
+    - secretKey: DATABASE-ADMIN-USERNAME
+      remoteRef:
+        key: DATABASE-ADMIN-USERNAME
+    - secretKey: DATABASE-ADMIN-PASSWORD
+      remoteRef:
+        key: DATABASE-ADMIN-PASSWORD
+
+# SecretStore reference
+secretStore:
+  # Type of SecretStore (SecretStore or ClusterSecretStore)
+  kind: SecretStore
+
+  # Name of the SecretStore resource
+  # This SecretStore must already exist in each namespace
+  name: azure-store
+
+# TLS Secrets Configuration
+# Create kubernetes.io/tls type secrets for ingress, services, etc.
+tlsSecrets:
+  # Enable TLS secret creation
+  enabled: false
+
+  # Name of the ExternalSecret resource for TLS
+  name: tls-secret-from-keyvault
+
+  # Name of the target Kubernetes Secret (type: kubernetes.io/tls)
+  targetSecretName: my-tls-secret
+
+  # How often to refresh the TLS secret from the external source
+  refreshInterval: 1h
+
+  # Creation policy for the target secret
+  creationPolicy: Owner
+
+  # Labels to apply to the TLS ExternalSecret resource
+  labels: {}
+  #   app: thingworx
+  #   component: tls-secret
+
+  # Annotations to apply to the TLS ExternalSecret resource
+  annotations: {}
+  #   argocd.argoproj.io/sync-wave: "-2"
+
+  # Secret key name for the certificate data in the ExternalSecret
+  certSecretKey: tlscert
+
+  # Secret key name for the private key data in the ExternalSecret
+  keySecretKey: tlskey
+
+  # Remote Key Vault secret name for the certificate
+  certRemoteKey: tls-cert
+
+  # Remote Key Vault secret name for the private key
+  keyRemoteKey: tls-key
+
+  # Optional: Property path if the cert is nested in a JSON secret
+  certRemoteProperty: ""
+
+  # Optional: Property path if the key is nested in a JSON secret
+  keyRemoteProperty: ""
+
+  # Optional: Additional data to include in the TLS secret
+  # Useful for CA certificates, certificate chains, etc.
+  additionalData: []
+  # Example: Add CA certificate
+  # - key: ca.crt
+  #   secretKey: cacert
+
+  # Optional: Additional secrets to fetch from Key Vault
+  additionalSecrets: []
+  # Example: Fetch CA certificate from Key Vault
+  # - secretKey: cacert
+  #   remoteRef:
+  #     key: ca-cert
+
+  # Optional: Template metadata for the generated TLS secret
+  template:
+    metadata: {}
+    #   labels:
+    #     app: thingworx
+    #     cert-type: ingress
