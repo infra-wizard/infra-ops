@@ -2,6 +2,7 @@ name: Branch Created
 
 on:
   create:
+    - '**'
 
 jobs:
   notify-branch-created:
