@@ -2,21 +2,11 @@ name: On Branch Creation
 
 on:
   create:
-    branches:
-      - '**'  # Triggers on any branch creation
-  
-  # Also trigger on push to ensure workflow runs from target branches
-  push:
-    branches:
-      - main        # Add your target branches here
-      - develop
-      - staging
-      # - 'release/**'  # Uncomment for pattern matching
 
 jobs:
   branch-created:
-    # Only run if the event is 'create' OR if pushing to a target branch
-    if: github.event_name == 'create'
+    # Only run when a branch is created (not tags)
+    if: github.ref_type == 'branch'
     runs-on: ubuntu-latest
     
     steps:
