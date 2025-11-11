@@ -1,12 +1,50 @@
-- name: Install ODBC drivers
-  run: |
-    sudo apt-get update
-    sudo ACCEPT_EULA=Y apt-get install -y --no-install-recommends \
-      curl \
-      gnupg \
-      apt-transport-https
-    curl https://packages.microsoft.com/keys/microsoft.asc | sudo apt-key add -
-    curl https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list | sudo tee /etc/apt/sources.list.d/mssql-release.list
-    sudo apt-get update
-    sudo ACCEPT_EULA=Y apt-get install -y --allow-downgrades msodbcsql17
-    sudo apt-get install -y unixodbc-dev
+name: On Branch Creation
+
+on:
+  create:
+    branches:
+      - '**'  # Triggers on any branch creation
+  
+  # Also trigger on push to ensure workflow runs from target branches
+  push:
+    branches:
+      - main        # Add your target branches here
+      - develop
+      - staging
+      # - 'release/**'  # Uncomment for pattern matching
+
+jobs:
+  branch-created:
+    # Only run if the event is 'create' OR if pushing to a target branch
+    if: github.event_name == 'create'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout target branch with workflow
+        uses: actions/checkout@v4
+        with:
+          # Checkout the branch that contains this workflow file
+          ref: main  # Change to your target branch (main, develop, etc.)
+      
+      - name: Get branch information
+        run: |
+          echo "New branch created: ${{ github.ref_name }}"
+          echo "Created by: ${{ github.actor }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Event type: ${{ github.event_name }}"
+      
+      - name: Send notification
+        run: |
+          echo "Branch ${{ github.ref_name }} has been created!"
+          # Add your custom logic here, such as:
+          # - Send Slack/Discord notification
+          # - Create a pull request template
+          # - Run initial tests
+          # - Set up branch protection rules
+          # - Notify team members
+      
+      - name: Run custom script (optional)
+        run: |
+          # Add any custom commands you want to run
+          # For example, initialize branch-specific configuration
+          echo "Running custom initialization for branch: ${{ github.ref_name }}"
