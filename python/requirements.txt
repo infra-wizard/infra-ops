@@ -1,1 +1,14 @@
-Flask==3.0.0
+# Set all temp-related environment variables
+export TF_PLUGIN_CACHE_DIR="$HOME/.terraform.d/plugin-cache"
+export TMP="$HOME/temp"
+export TEMP="$HOME/temp"
+export TMPDIR="$HOME/temp"
+
+# Create the directories
+mkdir -p ~/temp
+
+# Verify the environment variables are set
+echo "TF_PLUGIN_CACHE_DIR: $TF_PLUGIN_CACHE_DIR"
+echo "TMP: $TMP"
+echo "TEMP: $TEMP"
+echo "TMPDIR: $TMPDIR"
