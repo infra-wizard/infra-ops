@@ -1,2 +1,4 @@
-psycopg2-binary
-pyodbc
+az postgres flexible-server connect \
+  --name db-lumen-membersdb-prod-rr-001 \
+  --admin-user psqladmin \
+  --database-name member-prod
