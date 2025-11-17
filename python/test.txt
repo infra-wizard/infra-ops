@@ -3,3 +3,7 @@ az acr build \
   --image data-analytics:latest \
   --file Dockerfile \
   .
+
+
+# Run a temporary Ubuntu pod in the same namespace
+kubectl run debug-pod --image=ubuntu:22.04 -n data-analytics --rm -it --restart=Never -- bash
