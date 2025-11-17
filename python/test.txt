@@ -42,6 +42,11 @@ except Exception as e:
 EOF
 
 
+apt-get install -y postgresql-client libpq-dev
+
+pip3 install psycopg2-binary
+
+
 python3 << EOF
 import psycopg2
 
