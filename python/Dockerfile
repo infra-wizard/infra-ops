@@ -1,6 +1,5 @@
 FROM python:3.11-slim-bullseye
 
-# Set environment to non-interactive
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install system dependencies
@@ -9,15 +8,17 @@ RUN apt-get update && apt-get install -y \
     apt-transport-https \
     gnupg \
     unixodbc-dev \
+    unixodbc \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Microsoft ODBC Driver 18 for SQL Server
+# Install ODBC Driver 17 for SQL Server
 RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
     && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
-    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
+    && echo msodbcsql17 msodbcsql/ACCEPT_EULA boolean true | debconf-set-selections \
+    && apt-get install -y msodbcsql17 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
