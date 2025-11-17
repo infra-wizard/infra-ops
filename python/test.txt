@@ -40,3 +40,30 @@ try:
 except Exception as e:
     print(f"✗ ERROR: {e}")
 EOF
+
+
+python3 << EOF
+import psycopg2
+
+try:
+    print("Connecting to PostgreSQL...")
+    conn = psycopg2.connect(
+        host="10.103.1.16",
+        port=5432,
+        database="member-prod",
+        user="psqladmin",
+        password="your-password",
+        connect_timeout=60
+    )
+    print("✓ Connected to PostgreSQL!")
+    
+    cursor = conn.cursor()
+    cursor.execute("SELECT version();")
+    version = cursor.fetchone()
+    print(f"PostgreSQL version: {version[0]}")
+    
+    cursor.close()
+    conn.close()
+except Exception as e:
+    print(f"✗ ERROR: {e}")
+EOF
