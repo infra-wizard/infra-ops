@@ -2,18 +2,20 @@ FROM python:3.11-slim-bullseye
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies
+# Install PostgreSQL and SQL Server dependencies
 RUN apt-get update && apt-get install -y \
     curl \
     apt-transport-https \
     gnupg \
+    postgresql-client \
+    libpq-dev \
     unixodbc-dev \
     unixodbc \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ODBC Driver 17 for SQL Server
+# Install ODBC Driver 17 for SQL Server (if you still need it)
 RUN curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
     && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
