@@ -1,35 +1,5 @@
-name: Azure Login with Environment Variables
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  azure-operations:
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Azure CLI Login
-      run: |
-        az login --service-principal \
-          -u ${{ secrets.AZURE_CLIENT_ID }} \
-          -p ${{ secrets.AZURE_CLIENT_SECRET }} \
-          --tenant ${{ secrets.AZURE_TENANT_ID }}
-    
-    - name: Set default subscription (optional)
-      run: |
-        az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-    
-    - name: Verify login
-      run: |
-        az account show
-    
-    - name: Run your Azure commands
-      run: |
-        # Your commands here
-        az vm list
-        az group list
+az acr build \
+  --registry lumen001wus3dev \
+  --image data-analytics:latest \
+  --file Dockerfile \
+  .
