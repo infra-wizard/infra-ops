@@ -1,12 +1,42 @@
-az acr build \
-  --registry lumen001wus3dev \
-  --image data-analytics:latest \
-  --file Dockerfile \
-  .
-
-
-# Run a temporary Ubuntu pod in the same namespace
 kubectl run debug-pod --image=ubuntu:22.04 -n data-analytics --rm -it --restart=Never -- bash
 
-apt-get update && apt-get install -y telnet dnsutils iputils-ping curl
+# Update and install necessary packages
+apt-get update
 
+# Install ODBC drivers and tools
+apt-get install -y curl apt-transport-https gnupg unixodbc-dev unixodbc python3 python3-pip telnet
+
+# Add Microsoft repository
+curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
+curl https://packages.microsoft.com/config/ubuntu/22.04/prod.list > /etc/apt/sources.list.d/mssql-release.list
+
+# Update and install ODBC Driver 17
+apt-get update
+ACCEPT_EULA=Y apt-get install -y msodbcsql17
+
+# Install pyodbc
+pip3 install pyodbc
+
+
+# If DNS doesn't work, test with private IP
+python3 << EOF
+import pyodbc
+
+conn_str = (
+    "DRIVER={ODBC Driver 17 for SQL Server};"
+    "SERVER=10.x.x.x;"  # Replace with actual private IP
+    "DATABASE=your-database;"
+    "UID=your-username;"
+    "PWD=your-password;"
+    "TrustServerCertificate=yes;"
+    "Connection Timeout=60;"
+)
+
+try:
+    print("Connecting with private IP...")
+    conn = pyodbc.connect(conn_str)
+    print("✓ Connected!")
+    conn.close()
+except Exception as e:
+    print(f"✗ ERROR: {e}")
+EOF
