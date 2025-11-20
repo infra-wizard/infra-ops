@@ -1,0 +1,9 @@
+image:
+  repository: data-analytics
+  tag: latest
+  pullPolicy: IfNotPresent
+
+backoffLimit: 1
+restartPolicy: Never
+
+resources: {}
