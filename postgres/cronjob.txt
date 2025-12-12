@@ -1,16 +1,8 @@
 # Stop PostgreSQL server every Friday at 6 PM
-0 18 * * 5 /path/to/stop-postgres.sh >> /var/log/postgres-schedule.log 2>&1
+0 18 * * 5 /path/to/postgres-weekend-manager.sh stop
 
 # Start PostgreSQL server every Monday at 6 AM
-0 6 * * 1 /path/to/start-postgres.sh >> /var/log/postgres-schedule.log 2>&1
-```
+0 6 * * 1 /path/to/postgres-weekend-manager.sh start
 
-**Cron schedule format:**
-```
-* * * * *
-│ │ │ │ │
-│ │ │ │ └─── Day of week (0-7, 0 or 7 = Sunday)
-│ │ │ └───── Month (1-12)
-│ │ └─────── Day of month (1-31)
-│ └───────── Hour (0-23)
-└─────────── Minute (0-59)
+# Optional: Check status every day at noon
+0 12 * * * /path/to/postgres-weekend-manager.sh status
