@@ -717,10 +717,10 @@ Edit both scripts and update the configuration section:
 
 ```python
 # Update these values in both scripts
-SOURCE_OWNER = "your-source-org"      # e.g., "facebook"
+SOURCE_OWNER = "your-source-org"      # e.g., "Trail-tech"
 SOURCE_REPO = "your-source-repo"      # e.g., "react"
-DEST_OWNER = "your-dest-org"          # e.g., "mycompany"
-DEST_REPO = "your-dest-repo"          # e.g., "react-fork"
+DEST_OWNER = "your-dest-org"          # e.g., "Polaris"
+DEST_REPO = "your-dest-repo"          # e.g., "react"
 ```
 
 ### Step 2: Make Scripts Executable
