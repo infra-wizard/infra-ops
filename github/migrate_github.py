@@ -244,6 +244,12 @@ class GitHubMigrator:
             print(f"  ⚠ Failed to set default branch: {response.json().get('message', 'Unknown error')}")
             return False
     
+    def get_all_branches(self, org: str, repo_name: str) -> List[str]:
+        """Get all branches from repository"""
+        url = f"{self.base_url}/repos/{org}/{repo_name}/branches"
+        branches_data = self.paginated_request(url, self.source_headers)
+        return [branch["name"] for branch in branches_data]
+    
     def get_branch_protection(self, org: str, repo_name: str, branch: str) -> Optional[Dict]:
         """Get branch protection rules for a branch"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/branches/{branch}/protection"
@@ -345,18 +351,44 @@ class GitHubMigrator:
             return False
     
     def migrate_branch_protection(self, repo_name: str, default_branch: str) -> bool:
-        """Migrate branch protection rules"""
+        """Migrate branch protection rules for ALL branches"""
         print(f"\n🛡️  Migrating branch protection rules...")
         
-        # Get protection for default branch
-        protection = self.get_branch_protection(self.source_org, repo_name, default_branch)
+        # Get all branches from source repository
+        print(f"  Fetching all branches...")
+        all_branches = self.get_all_branches(self.source_org, repo_name)
+        print(f"  Found {len(all_branches)} branches")
         
-        if protection:
-            print(f"  Found protection rules for {default_branch}")
-            return self.set_branch_protection(repo_name, default_branch, protection)
-        else:
-            print(f"  No protection rules found for {default_branch}")
+        protected_branches = []
+        migrated_count = 0
+        failed_count = 0
+        
+        # Check each branch for protection rules
+        for branch in all_branches:
+            protection = self.get_branch_protection(self.source_org, repo_name, branch)
+            if protection:
+                protected_branches.append((branch, protection))
+                print(f"  ✓ Found protection rules for branch: {branch}")
+        
+        if not protected_branches:
+            print(f"  No branch protection rules found")
             return True
+        
+        print(f"\n  Migrating protection rules for {len(protected_branches)} branch(es)...")
+        
+        # Migrate protection rules for each protected branch
+        for branch, protection in protected_branches:
+            if self.set_branch_protection(repo_name, branch, protection):
+                migrated_count += 1
+            else:
+                failed_count += 1
+            time.sleep(0.5)  # Rate limiting
+        
+        print(f"\n  ✅ Branch Protection Migration Summary:")
+        print(f"    Migrated: {migrated_count}")
+        print(f"    Failed: {failed_count}")
+        
+        return failed_count == 0
     
     def get_all_pull_requests(self, org: str, repo_name: str) -> List[Dict]:
         """Get all pull requests from source repository"""
@@ -382,16 +414,34 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls/{pr_number}/reviews"
         return self.paginated_request(url, self.source_headers)
     
+    def branch_exists(self, repo_name: str, branch: str) -> bool:
+        """Check if a branch exists in target repository"""
+        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/branches/{branch}"
+        response = requests.get(url, headers=self.target_headers)
+        return response.status_code == 200
+    
     def create_pull_request(self, repo_name: str, pr_data: Dict) -> Optional[Dict]:
         """Create a pull request in target repository"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls"
+        
+        head_branch = pr_data["head"]["ref"]
+        base_branch = pr_data["base"]["ref"]
+        
+        # Check if branches exist before attempting to create PR
+        if not self.branch_exists(repo_name, head_branch):
+            print(f"    ⚠ Head branch '{head_branch}' does not exist in target repo")
+            return None
+        
+        if not self.branch_exists(repo_name, base_branch):
+            print(f"    ⚠ Base branch '{base_branch}' does not exist in target repo")
+            return None
         
         # Extract only the necessary fields
         payload = {
             "title": pr_data["title"],
             "body": self.format_migrated_body(pr_data.get("body", ""), pr_data),
-            "head": pr_data["head"]["ref"],
-            "base": pr_data["base"]["ref"],
+            "head": head_branch,
+            "base": base_branch,
         }
         
         # Add labels if present
@@ -416,7 +466,13 @@ class GitHubMigrator:
             
             return new_pr
         else:
-            print(f"  ⚠ Failed to create PR #{pr_data['number']}: {response.json().get('message', 'Unknown error')}")
+            error_data = response.json()
+            error_msg = error_data.get('message', 'Unknown error')
+            errors = error_data.get('errors', [])
+            if errors:
+                error_details = '; '.join([f"{e.get('field', '')}: {e.get('message', '')}" for e in errors])
+                error_msg = f"{error_msg} ({error_details})"
+            print(f"    ⚠ Failed to create PR #{pr_data['number']}: {error_msg}")
             return None
     
     def add_issue_assignees(self, repo_name: str, issue_number: int, assignees: List[str]) -> bool:
@@ -478,6 +534,7 @@ class GitHubMigrator:
         
         migrated_count = 0
         failed_count = 0
+        failed_prs = []
         
         for pr in source_prs:
             pr_number = pr["number"]
@@ -490,7 +547,14 @@ class GitHubMigrator:
                 
                 if not new_pr:
                     failed_count += 1
-                    print(f"    ⚠ Skipping PR #{pr_number} (branches may not exist)")
+                    head_branch = pr.get("head", {}).get("ref", "unknown")
+                    base_branch = pr.get("base", {}).get("ref", "unknown")
+                    failed_prs.append({
+                        "number": pr_number,
+                        "title": pr.get("title", "")[:50],
+                        "head": head_branch,
+                        "base": base_branch
+                    })
                     continue
                 
                 new_pr_number = new_pr["number"]
@@ -551,6 +615,13 @@ class GitHubMigrator:
         print(f"\n✅ Pull Request Migration Complete:")
         print(f"  Migrated: {migrated_count}")
         print(f"  Failed: {failed_count}")
+        
+        if failed_prs:
+            print(f"\n  ⚠ Failed PRs (branches may not exist or were deleted):")
+            for failed_pr in failed_prs[:10]:  # Show first 10
+                print(f"    - PR #{failed_pr['number']}: {failed_pr['title']} (head: {failed_pr['head']}, base: {failed_pr['base']})")
+            if len(failed_prs) > 10:
+                print(f"    ... and {len(failed_prs) - 10} more")
     
     def create_review_summary(self, review_comments: List[Dict]) -> str:
         """Create a summary of review comments"""
