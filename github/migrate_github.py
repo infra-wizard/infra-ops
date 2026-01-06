@@ -350,9 +350,67 @@ class GitHubMigrator:
             print(f"    ⚠ Failed to set protection for {branch}: {error_msg}")
             return False
     
+    def get_repository_rulesets(self, org: str, repo_name: str) -> List[Dict]:
+        """Get repository rulesets (pattern-based branch protection rules)"""
+        url = f"{self.base_url}/repos/{org}/{repo_name}/rulesets"
+        response = requests.get(url, headers=self.source_headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            return []
+        else:
+            print(f"  ⚠ Error fetching rulesets: {response.json().get('message', 'Unknown error')}")
+            return []
+    
+    def create_repository_ruleset(self, repo_name: str, ruleset_data: Dict) -> bool:
+        """Create a repository ruleset in target repository"""
+        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/rulesets"
+        
+        # Build ruleset payload from source data
+        payload = {
+            "name": ruleset_data.get("name", ""),
+            "target": ruleset_data.get("target", "branch"),
+            "enforcement": ruleset_data.get("enforcement", "active"),
+            "conditions": ruleset_data.get("conditions", {}),
+            "rules": ruleset_data.get("rules", [])
+        }
+        
+        # Include bypass_actors if present
+        if "bypass_actors" in ruleset_data:
+            payload["bypass_actors"] = ruleset_data["bypass_actors"]
+        
+        response = requests.post(url, headers=self.target_headers, json=payload)
+        
+        if response.status_code == 201:
+            print(f"    ✓ Ruleset '{ruleset_data.get('name', 'unnamed')}' created")
+            return True
+        else:
+            error_msg = response.json().get('message', 'Unknown error')
+            print(f"    ⚠ Failed to create ruleset '{ruleset_data.get('name', 'unnamed')}': {error_msg}")
+            return False
+    
     def migrate_branch_protection(self, repo_name: str, default_branch: str) -> bool:
         """Migrate branch protection rules for ALL branches"""
         print(f"\n🛡️  Migrating branch protection rules...")
+        
+        # First, try to get repository rulesets (newer pattern-based approach)
+        print(f"  Checking for repository rulesets (pattern-based rules)...")
+        rulesets = self.get_repository_rulesets(self.source_org, repo_name)
+        
+        if rulesets:
+            print(f"  Found {len(rulesets)} ruleset(s)")
+            for ruleset in rulesets:
+                ruleset_name = ruleset.get("name", "unnamed")
+                target = ruleset.get("target", "branch")
+                print(f"    - Ruleset: {ruleset_name} (target: {target})")
+                
+                # Migrate ruleset
+                if self.create_repository_ruleset(repo_name, ruleset):
+                    time.sleep(0.5)  # Rate limiting
+        
+        # Also check individual branch protection (older approach)
+        print(f"\n  Checking individual branch protection rules...")
         
         # Get all branches from source repository
         print(f"  Fetching all branches...")
@@ -364,28 +422,43 @@ class GitHubMigrator:
         failed_count = 0
         
         # Check each branch for protection rules
-        for branch in all_branches:
+        print(f"  Checking each branch for protection rules...")
+        for i, branch in enumerate(all_branches, 1):
             protection = self.get_branch_protection(self.source_org, repo_name, branch)
             if protection:
                 protected_branches.append((branch, protection))
-                print(f"  ✓ Found protection rules for branch: {branch}")
+                print(f"  [{i}/{len(all_branches)}] ✓ Found protection rules for branch: {branch}")
+            time.sleep(0.1)  # Small delay to avoid rate limiting
         
         if not protected_branches:
-            print(f"  No branch protection rules found")
+            if not rulesets:
+                print(f"  No branch protection rules found")
             return True
         
         print(f"\n  Migrating protection rules for {len(protected_branches)} branch(es)...")
         
         # Migrate protection rules for each protected branch
         for branch, protection in protected_branches:
+            print(f"    Migrating protection for branch: {branch}...")
+            
+            # Check if branch exists in target repository
+            if not self.branch_exists(repo_name, branch):
+                print(f"      ⚠ Branch '{branch}' does not exist in target repo, skipping protection")
+                failed_count += 1
+                continue
+            
             if self.set_branch_protection(repo_name, branch, protection):
                 migrated_count += 1
+                print(f"      ✓ Successfully migrated protection for {branch}")
             else:
                 failed_count += 1
+                print(f"      ✗ Failed to migrate protection for {branch}")
             time.sleep(0.5)  # Rate limiting
         
         print(f"\n  ✅ Branch Protection Migration Summary:")
-        print(f"    Migrated: {migrated_count}")
+        if rulesets:
+            print(f"    Rulesets migrated: {len(rulesets)}")
+        print(f"    Individual branch rules migrated: {migrated_count}")
         print(f"    Failed: {failed_count}")
         
         return failed_count == 0
