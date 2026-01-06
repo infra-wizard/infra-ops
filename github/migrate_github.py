@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 import sys
 from datetime import datetime
 import argparse
+import fnmatch
 
 class GitHubMigrator:
     def __init__(self, source_token: str, target_token: str, source_org: str, target_org: str):
@@ -529,6 +530,97 @@ class GitHubMigrator:
             return [secret["name"] for secret in response.json().get("secrets", [])]
         return []
     
+    def graphql_request(self, query: str, headers: Dict) -> Optional[Dict]:
+        """Make a GraphQL API request"""
+        url = f"{self.base_url}/graphql"
+        response = requests.post(url, headers=headers, json={"query": query})
+        
+        if response.status_code == 200:
+            data = response.json()
+            if "errors" in data:
+                print(f"    ⚠ GraphQL errors: {data['errors']}")
+                return None
+            return data.get("data")
+        else:
+            print(f"    ⚠ GraphQL request failed: {response.status_code}")
+            return None
+    
+    def get_all_branch_protection_rules(self, org: str, repo_name: str) -> List[Dict]:
+        """Get all branch protection rules using GraphQL (includes pattern-based rules)"""
+        # GraphQL query to get all branch protection rules
+        query = f"""
+        {{
+          repository(owner: "{org}", name: "{repo_name}") {{
+            branchProtectionRules(first: 100) {{
+              nodes {{
+                pattern
+                isAdminEnforced
+                allowsDeletions
+                allowsForcePushes
+                requiresLinearHistory
+                requiresCommitSignatures
+                requiresConversationResolution
+                requiresStatusChecks {{
+                  strict
+                  contexts
+                }}
+                requiredApprovingReviewCount
+                dismissesStaleReviews
+                requiresCodeOwnerReviews
+                requiresLastPushApproval
+                restrictsPushes
+                restrictsReviewDismissals
+                pushAllowances(first: 100) {{
+                  nodes {{
+                    actor {{
+                      ... on User {{
+                        login
+                      }}
+                      ... on Team {{
+                        slug
+                      }}
+                      ... on App {{
+                        slug
+                      }}
+                    }}
+                  }}
+                }}
+                reviewDismissalAllowances(first: 100) {{
+                  nodes {{
+                    actor {{
+                      ... on User {{
+                        login
+                      }}
+                      ... on Team {{
+                        slug
+                      }}
+                      ... on App {{
+                        slug
+                      }}
+                    }}
+                  }}
+                }}
+                requiredStatusCheckContexts
+                lockBranch
+                requiredDeployments {{
+                  environments
+                }}
+                blockCreations
+                allowForkSyncing
+              }}
+            }}
+          }}
+        }}
+        """
+        
+        data = self.graphql_request(query, self.source_headers)
+        
+        if not data or not data.get("repository"):
+            return []
+        
+        rules = data["repository"].get("branchProtectionRules", {}).get("nodes", [])
+        return rules
+    
     def get_all_branches(self, org: str, repo_name: str) -> List[str]:
         """Get all branches from repository"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/branches"
@@ -536,7 +628,7 @@ class GitHubMigrator:
         return [branch["name"] for branch in branches_data]
     
     def get_branch_protection(self, org: str, repo_name: str, branch: str) -> Optional[Dict]:
-        """Get branch protection rules for a specific branch"""
+        """Get branch protection rules for a specific branch (REST API fallback)"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/branches/{branch}/protection"
         response = requests.get(url, headers=self.source_headers)
         
@@ -549,117 +641,268 @@ class GitHubMigrator:
             print(f"    ⚠ Failed to get protection for {branch}: {response.status_code}")
             return None
     
+    def convert_graphql_to_rest_payload(self, graphql_rule: Dict) -> Dict:
+        """Convert GraphQL branch protection rule to REST API payload format"""
+        payload = {}
+        
+        # Pattern (branch name or pattern like feature/*)
+        pattern = graphql_rule.get("pattern")
+        
+        # Enforce admins
+        if "isAdminEnforced" in graphql_rule:
+            payload["enforce_admins"] = graphql_rule.get("isAdminEnforced", False)
+        
+        # Required status checks
+        requires_status_checks = graphql_rule.get("requiresStatusChecks")
+        if requires_status_checks:
+            payload["required_status_checks"] = {
+                "strict": requires_status_checks.get("strict", False),
+                "contexts": requires_status_checks.get("contexts", []) or graphql_rule.get("requiredStatusCheckContexts", [])
+            }
+        else:
+            payload["required_status_checks"] = None
+        
+        # Required pull request reviews
+        required_approving_review_count = graphql_rule.get("requiredApprovingReviewCount")
+        if required_approving_review_count is not None:
+            pr_review_payload = {
+                "dismiss_stale_reviews": graphql_rule.get("dismissesStaleReviews", False),
+                "require_code_owner_reviews": graphql_rule.get("requiresCodeOwnerReviews", False),
+                "required_approving_review_count": required_approving_review_count,
+                "require_last_push_approval": graphql_rule.get("requiresLastPushApproval", False)
+            }
+            
+            # Dismissal restrictions
+            review_dismissal_allowances = graphql_rule.get("reviewDismissalAllowances", {}).get("nodes", [])
+            if review_dismissal_allowances:
+                dismissal_restrictions = {"users": [], "teams": [], "apps": []}
+                for allowance in review_dismissal_allowances:
+                    actor = allowance.get("actor", {})
+                    if "login" in actor:  # User
+                        dismissal_restrictions["users"].append(actor["login"])
+                    elif "slug" in actor:  # Team or App
+                        # Check if it's a team (teams usually have organization context)
+                        # For simplicity, we'll add to teams if it has slug
+                        dismissal_restrictions["teams"].append(actor["slug"])
+                
+                pr_review_payload["dismissal_restrictions"] = dismissal_restrictions
+            else:
+                pr_review_payload["dismissal_restrictions"] = None
+            
+            payload["required_pull_request_reviews"] = pr_review_payload
+        else:
+            payload["required_pull_request_reviews"] = None
+        
+        # Restrictions (who can push)
+        push_allowances = graphql_rule.get("pushAllowances", {}).get("nodes", [])
+        restricts_pushes = graphql_rule.get("restrictsPushes", False)
+        if restricts_pushes and push_allowances:
+            restriction_payload = {"users": [], "teams": [], "apps": []}
+            for allowance in push_allowances:
+                actor = allowance.get("actor", {})
+                if "login" in actor:  # User
+                    restriction_payload["users"].append(actor["login"])
+                elif "slug" in actor:  # Team or App
+                    restriction_payload["teams"].append(actor["slug"])
+            
+            payload["restrictions"] = restriction_payload if any(restriction_payload.values()) else None
+        else:
+            payload["restrictions"] = None
+        
+        # Allow force pushes
+        payload["allow_force_pushes"] = graphql_rule.get("allowsForcePushes", False)
+        
+        # Allow deletions
+        payload["allow_deletions"] = graphql_rule.get("allowsDeletions", False)
+        
+        # Required linear history
+        payload["required_linear_history"] = graphql_rule.get("requiresLinearHistory", False)
+        
+        # Require signed commits
+        payload["require_signed_commits"] = graphql_rule.get("requiresCommitSignatures", False)
+        
+        # Require conversation resolution
+        payload["required_conversation_resolution"] = graphql_rule.get("requiresConversationResolution", False)
+        
+        # Lock branch
+        payload["lock_branch"] = graphql_rule.get("lockBranch", False)
+        
+        # Required deployments
+        required_deployments = graphql_rule.get("requiredDeployments")
+        if required_deployments and required_deployments.get("environments"):
+            payload["required_deployments"] = {
+                "enforcement_level": "non_production",  # Default, may need adjustment
+                "environments": required_deployments.get("environments", [])
+            }
+        else:
+            payload["required_deployments"] = None
+        
+        # Block creations
+        payload["block_creations"] = graphql_rule.get("blockCreations", False)
+        
+        # Allow fork syncing
+        payload["allow_fork_syncing"] = graphql_rule.get("allowForkSyncing", False)
+        
+        return payload, pattern
+    
+    def apply_branch_protection_by_pattern(self, repo_name: str, pattern: str, protection_payload: Dict) -> bool:
+        """Apply branch protection rules to a branch or pattern in target repository"""
+        # Check if pattern contains wildcards (like feature/*)
+        has_wildcard = '*' in pattern or '?' in pattern
+        
+        if has_wildcard:
+            # For pattern-based rules, find all branches that match the pattern
+            target_branches = self.get_all_branches(self.target_org, repo_name)
+            matching_branches = [b for b in target_branches if fnmatch.fnmatch(b, pattern)]
+            
+            if not matching_branches:
+                print(f"    ⚠ No branches match pattern {pattern} in target repository")
+                return False
+            
+            # Apply protection to each matching branch
+            success_count = 0
+            for branch in matching_branches:
+                if self.apply_branch_protection(repo_name, branch, protection_payload):
+                    success_count += 1
+                time.sleep(0.3)  # Rate limiting between branches
+            
+            # Return True if at least one branch was protected
+            return success_count > 0
+        else:
+            # Direct branch name - apply protection directly
+            return self.apply_branch_protection(repo_name, pattern, protection_payload)
+    
     def apply_branch_protection(self, repo_name: str, branch: str, protection_data: Dict) -> bool:
         """Apply branch protection rules to a branch in target repository"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/branches/{branch}/protection"
         
-        # Build the protection payload from source data
-        payload = {}
+        # Check if protection_data is already in REST API payload format (flat, from GraphQL conversion)
+        # vs REST API response format (nested with {"enabled": True} structures)
+        is_flat_format = isinstance(protection_data.get("enforce_admins"), bool) or "enforce_admins" not in protection_data
         
-        # Required status checks
-        if "required_status_checks" in protection_data:
-            required_status_checks = protection_data["required_status_checks"]
-            if required_status_checks:
-                payload["required_status_checks"] = {
-                    "strict": required_status_checks.get("strict", False),
-                    "contexts": required_status_checks.get("contexts", [])
-                }
-            else:
-                payload["required_status_checks"] = None
-        
-        # Enforce admins
-        if "enforce_admins" in protection_data:
-            enforce_admins = protection_data["enforce_admins"]
-            payload["enforce_admins"] = enforce_admins.get("enabled", False) if enforce_admins else False
-        
-        # Required pull request reviews
-        if "required_pull_request_reviews" in protection_data:
-            required_pr_reviews = protection_data["required_pull_request_reviews"]
-            if required_pr_reviews:
-                pr_review_payload = {
-                    "dismiss_stale_reviews": required_pr_reviews.get("dismiss_stale_reviews", False),
-                    "require_code_owner_reviews": required_pr_reviews.get("require_code_owner_reviews", False),
-                    "required_approving_review_count": required_pr_reviews.get("required_approving_review_count", 1),
-                    "require_last_push_approval": required_pr_reviews.get("require_last_push_approval", False)
-                }
-                
-                # Handle dismissal restrictions
-                dismissal_restrictions = required_pr_reviews.get("dismissal_restrictions")
-                if dismissal_restrictions:
-                    pr_review_payload["dismissal_restrictions"] = {
-                        "users": [u["login"] for u in dismissal_restrictions.get("users", [])],
-                        "teams": [t["slug"] for t in dismissal_restrictions.get("teams", [])],
-                        "apps": [a["slug"] for a in dismissal_restrictions.get("apps", [])]
+        if is_flat_format:
+            # Already in REST API payload format, use directly
+            payload = protection_data
+        else:
+            # Build the protection payload from REST API response format (nested)
+            payload = {}
+            
+            # Required status checks
+            if "required_status_checks" in protection_data:
+                required_status_checks = protection_data["required_status_checks"]
+                if required_status_checks:
+                    payload["required_status_checks"] = {
+                        "strict": required_status_checks.get("strict", False),
+                        "contexts": required_status_checks.get("contexts", [])
                     }
                 else:
-                    pr_review_payload["dismissal_restrictions"] = None
-                
-                payload["required_pull_request_reviews"] = pr_review_payload
-            else:
-                payload["required_pull_request_reviews"] = None
-        
-        # Restrictions (who can push to this branch)
-        if "restrictions" in protection_data:
-            restrictions = protection_data["restrictions"]
-            if restrictions:
-                restriction_payload = {}
-                users = restrictions.get("users", [])
-                teams = restrictions.get("teams", [])
-                apps = restrictions.get("apps", [])
-                
-                if users:
-                    restriction_payload["users"] = [u["login"] for u in users]
-                if teams:
-                    restriction_payload["teams"] = [t["slug"] for t in teams]
-                if apps:
-                    restriction_payload["apps"] = [a["slug"] for a in apps]
-                
-                payload["restrictions"] = restriction_payload if restriction_payload else None
-            else:
-                payload["restrictions"] = None
-        
-        # Allow force pushes
-        if "allow_force_pushes" in protection_data:
-            payload["allow_force_pushes"] = protection_data.get("allow_force_pushes", {}).get("enabled", False) if protection_data.get("allow_force_pushes") else False
-        
-        # Allow deletions
-        if "allow_deletions" in protection_data:
-            payload["allow_deletions"] = protection_data.get("allow_deletions", {}).get("enabled", False) if protection_data.get("allow_deletions") else False
-        
-        # Required linear history
-        if "required_linear_history" in protection_data:
-            payload["required_linear_history"] = protection_data.get("required_linear_history", {}).get("enabled", False) if protection_data.get("required_linear_history") else False
-        
-        # Require signed commits
-        if "require_signed_commits" in protection_data:
-            payload["require_signed_commits"] = protection_data.get("require_signed_commits", {}).get("enabled", False) if protection_data.get("require_signed_commits") else False
-        
-        # Require conversation resolution
-        if "required_conversation_resolution" in protection_data:
-            payload["required_conversation_resolution"] = protection_data.get("required_conversation_resolution", {}).get("enabled", False) if protection_data.get("required_conversation_resolution") else False
-        
-        # Lock branch
-        if "lock_branch" in protection_data:
-            payload["lock_branch"] = protection_data.get("lock_branch", {}).get("enabled", False) if protection_data.get("lock_branch") else False
-        
-        # Require deployments
-        if "required_deployments" in protection_data:
-            required_deployments = protection_data["required_deployments"]
-            if required_deployments:
-                payload["required_deployments"] = {
-                    "enforcement_level": required_deployments.get("enforcement_level", "none"),
-                    "environments": required_deployments.get("environments", [])
-                }
-            else:
-                payload["required_deployments"] = None
-        
-        # Block creations
-        if "block_creations" in protection_data:
-            payload["block_creations"] = protection_data.get("block_creations", {}).get("enabled", False) if protection_data.get("block_creations") else False
-        
-        # Allow fork syncing
-        if "allow_fork_syncing" in protection_data:
-            payload["allow_fork_syncing"] = protection_data.get("allow_fork_syncing", {}).get("enabled", False) if protection_data.get("allow_fork_syncing") else False
+                    payload["required_status_checks"] = None
+            
+            # Enforce admins
+            if "enforce_admins" in protection_data:
+                enforce_admins = protection_data["enforce_admins"]
+                payload["enforce_admins"] = enforce_admins.get("enabled", False) if isinstance(enforce_admins, dict) else enforce_admins
+            
+            # Required pull request reviews
+            if "required_pull_request_reviews" in protection_data:
+                required_pr_reviews = protection_data["required_pull_request_reviews"]
+                if required_pr_reviews:
+                    pr_review_payload = {
+                        "dismiss_stale_reviews": required_pr_reviews.get("dismiss_stale_reviews", False),
+                        "require_code_owner_reviews": required_pr_reviews.get("require_code_owner_reviews", False),
+                        "required_approving_review_count": required_pr_reviews.get("required_approving_review_count", 1),
+                        "require_last_push_approval": required_pr_reviews.get("require_last_push_approval", False)
+                    }
+                    
+                    # Handle dismissal restrictions
+                    dismissal_restrictions = required_pr_reviews.get("dismissal_restrictions")
+                    if dismissal_restrictions:
+                        users_list = dismissal_restrictions.get("users", [])
+                        teams_list = dismissal_restrictions.get("teams", [])
+                        apps_list = dismissal_restrictions.get("apps", [])
+                        
+                        pr_review_payload["dismissal_restrictions"] = {
+                            "users": [u["login"] for u in users_list] if users_list and isinstance(users_list[0], dict) else users_list,
+                            "teams": [t["slug"] for t in teams_list] if teams_list and isinstance(teams_list[0], dict) else teams_list,
+                            "apps": [a["slug"] for a in apps_list] if apps_list and isinstance(apps_list[0], dict) else apps_list
+                        }
+                    else:
+                        pr_review_payload["dismissal_restrictions"] = None
+                    
+                    payload["required_pull_request_reviews"] = pr_review_payload
+                else:
+                    payload["required_pull_request_reviews"] = None
+            
+            # Restrictions (who can push to this branch)
+            if "restrictions" in protection_data:
+                restrictions = protection_data["restrictions"]
+                if restrictions:
+                    restriction_payload = {}
+                    users = restrictions.get("users", [])
+                    teams = restrictions.get("teams", [])
+                    apps = restrictions.get("apps", [])
+                    
+                    if users:
+                        restriction_payload["users"] = [u["login"] for u in users] if users and isinstance(users[0], dict) else users
+                    if teams:
+                        restriction_payload["teams"] = [t["slug"] for t in teams] if teams and isinstance(teams[0], dict) else teams
+                    if apps:
+                        restriction_payload["apps"] = [a["slug"] for a in apps] if apps and isinstance(apps[0], dict) else apps
+                    
+                    payload["restrictions"] = restriction_payload if restriction_payload else None
+                else:
+                    payload["restrictions"] = None
+            
+            # Allow force pushes
+            if "allow_force_pushes" in protection_data:
+                allow_force = protection_data.get("allow_force_pushes")
+                payload["allow_force_pushes"] = allow_force.get("enabled", False) if isinstance(allow_force, dict) else allow_force
+            
+            # Allow deletions
+            if "allow_deletions" in protection_data:
+                allow_del = protection_data.get("allow_deletions")
+                payload["allow_deletions"] = allow_del.get("enabled", False) if isinstance(allow_del, dict) else allow_del
+            
+            # Required linear history
+            if "required_linear_history" in protection_data:
+                linear = protection_data.get("required_linear_history")
+                payload["required_linear_history"] = linear.get("enabled", False) if isinstance(linear, dict) else linear
+            
+            # Require signed commits
+            if "require_signed_commits" in protection_data:
+                signed = protection_data.get("require_signed_commits")
+                payload["require_signed_commits"] = signed.get("enabled", False) if isinstance(signed, dict) else signed
+            
+            # Require conversation resolution
+            if "required_conversation_resolution" in protection_data:
+                conv_res = protection_data.get("required_conversation_resolution")
+                payload["required_conversation_resolution"] = conv_res.get("enabled", False) if isinstance(conv_res, dict) else conv_res
+            
+            # Lock branch
+            if "lock_branch" in protection_data:
+                lock = protection_data.get("lock_branch")
+                payload["lock_branch"] = lock.get("enabled", False) if isinstance(lock, dict) else lock
+            
+            # Require deployments
+            if "required_deployments" in protection_data:
+                required_deployments = protection_data["required_deployments"]
+                if required_deployments:
+                    payload["required_deployments"] = {
+                        "enforcement_level": required_deployments.get("enforcement_level", "none"),
+                        "environments": required_deployments.get("environments", [])
+                    }
+                else:
+                    payload["required_deployments"] = None
+            
+            # Block creations
+            if "block_creations" in protection_data:
+                block = protection_data.get("block_creations")
+                payload["block_creations"] = block.get("enabled", False) if isinstance(block, dict) else block
+            
+            # Allow fork syncing
+            if "allow_fork_syncing" in protection_data:
+                fork_sync = protection_data.get("allow_fork_syncing")
+                payload["allow_fork_syncing"] = fork_sync.get("enabled", False) if isinstance(fork_sync, dict) else fork_sync
         
         response = requests.put(url, headers=self.target_headers, json=payload)
         
@@ -675,65 +918,67 @@ class GitHubMigrator:
             return False
     
     def migrate_branch_protection(self, repo_name: str):
-        """Migrate branch protection rules from source to target repository"""
+        """Migrate branch protection rules from source to target repository using GraphQL"""
         print(f"\n🛡️  Migrating Branch Protection Rules...")
         
-        # Get all branches from source
-        source_branches = self.get_all_branches(self.source_org, repo_name)
-        print(f"  Found {len(source_branches)} branches in source repository")
+        # Get all branch protection rules using GraphQL (includes pattern-based rules)
+        print("  Fetching branch protection rules using GraphQL...")
+        graphql_rules = self.get_all_branch_protection_rules(self.source_org, repo_name)
         
-        if not source_branches:
-            print("  No branches to check for protection rules")
+        if not graphql_rules:
+            print("  No branch protection rules found in source repository")
             return
         
-        protected_branches = []
+        print(f"  Found {len(graphql_rules)} branch protection rule(s)")
+        
         migrated_count = 0
         failed_count = 0
         
-        for branch in source_branches:
-            # Get protection rules for this branch
-            protection_data = self.get_branch_protection(self.source_org, repo_name, branch)
+        for rule in graphql_rules:
+            pattern = rule.get("pattern", "unknown")
+            print(f"\n  Processing protection rule for pattern: {pattern}")
             
-            if protection_data:
-                protected_branches.append(branch)
-                print(f"\n  Processing protection rules for branch: {branch}")
+            # Convert GraphQL format to REST API payload
+            protection_payload, pattern_name = self.convert_graphql_to_rest_payload(rule)
+            
+            # Apply protection rules to target
+            # Note: GitHub REST API applies rules to branch names, so patterns like "feature/*" 
+            # need to be applied as-is (GitHub will interpret them)
+            if self.apply_branch_protection_by_pattern(repo_name, pattern_name, protection_payload):
+                migrated_count += 1
+                print(f"    ✓ Protection rules applied to {pattern_name}")
                 
-                # Apply protection rules to target
-                if self.apply_branch_protection(repo_name, branch, protection_data):
-                    migrated_count += 1
-                    print(f"    ✓ Protection rules applied to {branch}")
-                    
-                    # Print summary of protection settings
-                    if protection_data.get("required_pull_request_reviews"):
-                        reviews = protection_data["required_pull_request_reviews"]
-                        print(f"      - Required PR reviews: {reviews.get('required_approving_review_count', 1)}")
-                        if reviews.get("require_code_owner_reviews"):
-                            print(f"      - Requires code owner reviews")
-                    
-                    if protection_data.get("required_status_checks"):
-                        status_checks = protection_data["required_status_checks"]
-                        contexts = status_checks.get("contexts", [])
-                        if contexts:
-                            print(f"      - Required status checks: {len(contexts)} check(s)")
-                    
-                    if protection_data.get("required_linear_history", {}).get("enabled"):
-                        print(f"      - Requires linear history")
-                    
-                    if protection_data.get("require_signed_commits", {}).get("enabled"):
-                        print(f"      - Requires signed commits")
-                    
-                    time.sleep(0.5)  # Rate limiting
-                else:
-                    failed_count += 1
-                    print(f"    ✗ Failed to apply protection rules to {branch}")
+                # Print summary of protection settings
+                if protection_payload.get("required_pull_request_reviews"):
+                    reviews = protection_payload["required_pull_request_reviews"]
+                    print(f"      - Required PR reviews: {reviews.get('required_approving_review_count', 1)}")
+                    if reviews.get("require_code_owner_reviews"):
+                        print(f"      - Requires code owner reviews")
+                
+                if protection_payload.get("required_status_checks"):
+                    status_checks = protection_payload["required_status_checks"]
+                    contexts = status_checks.get("contexts", [])
+                    if contexts:
+                        print(f"      - Required status checks: {len(contexts)} check(s)")
+                
+                if protection_payload.get("required_linear_history"):
+                    print(f"      - Requires linear history")
+                
+                if protection_payload.get("require_signed_commits"):
+                    print(f"      - Requires signed commits")
+                
+                if protection_payload.get("enforce_admins"):
+                    print(f"      - Enforced for admins")
+                
+                time.sleep(0.5)  # Rate limiting
+            else:
+                failed_count += 1
+                print(f"    ✗ Failed to apply protection rules to {pattern_name}")
         
-        if not protected_branches:
-            print("  No branches have protection rules configured")
-        else:
-            print(f"\n✅ Branch Protection Migration Complete:")
-            print(f"  Protected branches found: {len(protected_branches)}")
-            print(f"  Successfully migrated: {migrated_count}")
-            print(f"  Failed: {failed_count}")
+        print(f"\n✅ Branch Protection Migration Complete:")
+        print(f"  Protection rules found: {len(graphql_rules)}")
+        print(f"  Successfully migrated: {migrated_count}")
+        print(f"  Failed: {failed_count}")
     
     def migrate_repository(self, repo_name: str):
         """Complete migration of a repository"""
