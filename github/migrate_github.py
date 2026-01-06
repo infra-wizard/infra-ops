@@ -504,18 +504,47 @@ class GitHubMigrator:
     
     def format_migrated_pr_as_issue_body(self, pr_data: Dict) -> str:
         """Format PR body as issue when branches don't exist"""
-        head_branch = pr_data.get("head", {}).get("ref", "unknown")
-        base_branch = pr_data.get("base", {}).get("ref", "unknown")
+        # Safe access to nested dictionaries
+        head_data = pr_data.get("head", {})
+        if isinstance(head_data, dict):
+            head_branch = head_data.get("ref", "unknown")
+            head_repo = head_data.get("repo", {})
+            if isinstance(head_repo, dict):
+                repo_name = head_repo.get("name", "unknown")
+            else:
+                repo_name = "unknown"
+        else:
+            head_branch = "unknown"
+            repo_name = "unknown"
+        
+        base_data = pr_data.get("base", {})
+        if isinstance(base_data, dict):
+            base_branch = base_data.get("ref", "unknown")
+        else:
+            base_branch = "unknown"
+        
         merged_at = pr_data.get("merged_at")
         closed_at = pr_data.get("closed_at")
+        
+        # Safe access to user data
+        user_data = pr_data.get("user", {})
+        if isinstance(user_data, dict):
+            user_login = user_data.get("login", "unknown")
+        else:
+            user_login = "unknown"
+        
+        pr_number = pr_data.get("number", "unknown")
+        created_at = pr_data.get("created_at", "unknown")
+        state = pr_data.get("state", "unknown")
+        body = pr_data.get("body", "") or ""
         
         metadata = f"""
 ---
 **⚠️ MIGRATED PR (Branches Deleted)**
-**🔄 Migrated from:** {self.source_org}/{pr_data.get('head', {}).get('repo', {}).get('name', 'unknown')}
-**📅 Original PR:** #{pr_data['number']} by @{pr_data['user']['login']}
-**📝 Created:** {pr_data['created_at']}
-**✅ Status:** {pr_data['state']} {'(merged)' if merged_at else ''}
+**🔄 Migrated from:** {self.source_org}/{repo_name}
+**📅 Original PR:** #{pr_number} by @{user_login}
+**📝 Created:** {created_at}
+**✅ Status:** {state} {'(merged)' if merged_at else ''}
 **🔀 Head Branch:** `{head_branch}` (deleted)
 **🔀 Base Branch:** `{base_branch}`
 {f"**✅ Merged:** {merged_at}" if merged_at else ""}
@@ -525,13 +554,23 @@ class GitHubMigrator:
 **Note:** This PR was migrated as a closed issue because the source branches no longer exist in the target repository. All comments and reviews from the original PR are preserved below.
 
 """
-        return metadata + (pr_data.get("body", "") or "")
+        return metadata + body
     
     def create_issue_comment(self, repo_name: str, issue_number: int, comment: Dict) -> bool:
         """Create a comment on an issue/PR"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}/comments"
         
-        body = f"**@{comment['user']['login']}** commented on {comment['created_at']}:\n\n{comment.get('body', '')}"
+        # Safe access to comment data
+        user_data = comment.get("user", {})
+        if isinstance(user_data, dict):
+            user_login = user_data.get("login", "unknown")
+        else:
+            user_login = "unknown"
+        
+        created_at = comment.get("created_at", "unknown")
+        comment_body = comment.get("body", "")
+        
+        body = f"**@{user_login}** commented on {created_at}:\n\n{comment_body}"
         
         payload = {"body": body}
         response = requests.post(url, headers=self.target_headers, json=payload)
@@ -575,12 +614,39 @@ class GitHubMigrator:
                 if not new_pr:
                     # Branches don't exist - create as closed issue to preserve history
                     print(f"    ℹ️  Creating as closed issue (branches deleted)...")
+                    
+                    # Safely extract labels
+                    labels = []
+                    pr_labels = pr.get("labels", [])
+                    if isinstance(pr_labels, list):
+                        for label in pr_labels:
+                            if isinstance(label, dict):
+                                label_name = label.get("name")
+                                if label_name:
+                                    labels.append(label_name)
+                            elif isinstance(label, str):
+                                labels.append(label)
+                    
+                    labels.extend(["migrated-pr", "branches-deleted"])
+                    
+                    # Safely extract assignees
+                    assignees = []
+                    pr_assignees = pr.get("assignees", [])
+                    if isinstance(pr_assignees, list):
+                        for assignee in pr_assignees:
+                            if isinstance(assignee, dict):
+                                assignee_login = assignee.get("login")
+                                if assignee_login:
+                                    assignees.append(assignee)
+                            elif isinstance(assignee, str):
+                                assignees.append({"login": assignee})
+                    
                     issue_data = {
-                        "title": f"[PR #{pr_number}] {pr.get('title', '')}",
+                        "title": f"[PR #{pr_number}] {pr.get('title', 'Untitled PR')}",
                         "body": self.format_migrated_pr_as_issue_body(pr),
                         "state": "closed",
-                        "labels": [label["name"] for label in pr.get("labels", [])] + ["migrated-pr", "branches-deleted"],
-                        "assignees": pr.get("assignees", [])
+                        "labels": labels,
+                        "assignees": assignees
                     }
                     
                     # Create issue instead of PR
@@ -756,10 +822,22 @@ class GitHubMigrator:
         # Use custom body if provided (for PRs converted to issues), otherwise format it
         body = issue_data.get("body") or self.format_migrated_issue_body(issue_data)
         
+        # Safely extract labels (handle both dict and string formats)
+        labels = []
+        issue_labels = issue_data.get("labels", [])
+        if isinstance(issue_labels, list):
+            for label in issue_labels:
+                if isinstance(label, dict):
+                    label_name = label.get("name")
+                    if label_name:
+                        labels.append(label_name)
+                elif isinstance(label, str):
+                    labels.append(label)
+        
         payload = {
             "title": issue_data["title"],
             "body": body,
-            "labels": [label["name"] for label in issue_data.get("labels", [])],
+            "labels": labels,
         }
         
         response = requests.post(url, headers=self.target_headers, json=payload)
@@ -767,10 +845,19 @@ class GitHubMigrator:
         if response.status_code == 201:
             new_issue = response.json()
             
-            # Add assignees if present
+            # Add assignees if present (handle both dict and string formats)
             if "assignees" in issue_data and issue_data["assignees"]:
-                assignees = [assignee["login"] for assignee in issue_data["assignees"]]
-                self.add_issue_assignees(repo_name, new_issue["number"], assignees)
+                assignee_logins = []
+                for assignee in issue_data["assignees"]:
+                    if isinstance(assignee, dict):
+                        login = assignee.get("login")
+                        if login:
+                            assignee_logins.append(login)
+                    elif isinstance(assignee, str):
+                        assignee_logins.append(assignee)
+                
+                if assignee_logins:
+                    self.add_issue_assignees(repo_name, new_issue["number"], assignee_logins)
             
             # Close issue if state is closed (for PRs converted to issues)
             if issue_data.get("state") == "closed":
