@@ -285,29 +285,55 @@ class GitHubMigrator:
         # Required pull request reviews
         if "required_pull_request_reviews" in protection_data:
             required_reviews = protection_data["required_pull_request_reviews"]
-            payload["required_pull_request_reviews"] = {
+            review_payload = {
                 "dismiss_stale_reviews": required_reviews.get("dismiss_stale_reviews", False),
                 "require_code_owner_reviews": required_reviews.get("require_code_owner_reviews", False),
                 "required_approving_review_count": required_reviews.get("required_approving_review_count", 1),
                 "require_last_push_approval": required_reviews.get("require_last_push_approval", False),
-                "dismissal_restrictions": {} if not required_reviews.get("dismissal_restrictions") else {
-                    "users": [u["login"] for u in required_reviews["dismissal_restrictions"].get("users", [])],
-                    "teams": [t["slug"] for t in required_reviews["dismissal_restrictions"].get("teams", [])]
-                },
-                "bypass_pull_request_allowances": {} if not required_reviews.get("bypass_pull_request_allowances") else {
-                    "users": [u["login"] for u in required_reviews["bypass_pull_request_allowances"].get("users", [])],
-                    "teams": [t["slug"] for t in required_reviews["bypass_pull_request_allowances"].get("teams", [])]
-                }
             }
+            
+            # Only include restrictions if they exist and have content
+            # GitHub API requires these to be omitted if empty, not included as empty objects
+            dismissal_restrictions = required_reviews.get("dismissal_restrictions")
+            if dismissal_restrictions and (dismissal_restrictions.get("users") or dismissal_restrictions.get("teams")):
+                users = [u["login"] for u in dismissal_restrictions.get("users", []) if isinstance(u, dict) and "login" in u]
+                teams = [t["slug"] for t in dismissal_restrictions.get("teams", []) if isinstance(t, dict) and "slug" in t]
+                if users or teams:
+                    review_payload["dismissal_restrictions"] = {}
+                    if users:
+                        review_payload["dismissal_restrictions"]["users"] = users
+                    if teams:
+                        review_payload["dismissal_restrictions"]["teams"] = teams
+            
+            # Only include bypass allowances if they exist and have content
+            bypass_allowances = required_reviews.get("bypass_pull_request_allowances")
+            if bypass_allowances and (bypass_allowances.get("users") or bypass_allowances.get("teams")):
+                users = [u["login"] for u in bypass_allowances.get("users", []) if isinstance(u, dict) and "login" in u]
+                teams = [t["slug"] for t in bypass_allowances.get("teams", []) if isinstance(t, dict) and "slug" in t]
+                if users or teams:
+                    review_payload["bypass_pull_request_allowances"] = {}
+                    if users:
+                        review_payload["bypass_pull_request_allowances"]["users"] = users
+                    if teams:
+                        review_payload["bypass_pull_request_allowances"]["teams"] = teams
+            
+            payload["required_pull_request_reviews"] = review_payload
         
         # Restrictions
         if "restrictions" in protection_data:
             restrictions = protection_data["restrictions"]
-            payload["restrictions"] = {
-                "users": [u["login"] for u in restrictions.get("users", [])],
-                "teams": [t["slug"] for t in restrictions.get("teams", [])],
-                "apps": [a["slug"] for a in restrictions.get("apps", [])]
-            }
+            users = [u["login"] for u in restrictions.get("users", []) if isinstance(u, dict) and "login" in u]
+            teams = [t["slug"] for t in restrictions.get("teams", []) if isinstance(t, dict) and "slug" in t]
+            apps = [a["slug"] for a in restrictions.get("apps", []) if isinstance(a, dict) and "slug" in a]
+            
+            if users or teams or apps:
+                payload["restrictions"] = {}
+                if users:
+                    payload["restrictions"]["users"] = users
+                if teams:
+                    payload["restrictions"]["teams"] = teams
+                if apps:
+                    payload["restrictions"]["apps"] = apps
         
         # Allow force pushes
         if "allow_force_pushes" in protection_data:
@@ -340,14 +366,41 @@ class GitHubMigrator:
                 "environments": protection_data["required_deployments"].get("environments", [])
             }
         
+        # GitHub requires at least one rule in the payload
+        if not payload:
+            print(f"    ⚠ No protection rules to apply for {branch} (empty payload)")
+            print(f"      Protection data keys: {list(protection_data.keys())}")
+            return False
+        
+        # Debug: Show what we're setting
+        print(f"      Applying protection rules: {', '.join(payload.keys())}")
+        
         response = requests.put(url, headers=self.target_headers, json=payload)
         
         if response.status_code == 200:
             print(f"    ✓ Protection rules applied to {branch}")
             return True
         else:
-            error_msg = response.json().get('message', 'Unknown error')
-            print(f"    ⚠ Failed to set protection for {branch}: {error_msg}")
+            try:
+                error_data = response.json()
+                error_msg = error_data.get('message', 'Unknown error')
+                errors = error_data.get('errors', [])
+                if errors:
+                    error_details = '; '.join([f"{e.get('field', '')}: {e.get('message', '')}" for e in errors])
+                    error_msg = f"{error_msg} ({error_details})"
+                print(f"    ⚠ Failed to set protection for {branch}: {error_msg}")
+                print(f"      Response status: {response.status_code}")
+                if response.status_code == 403:
+                    print(f"      ⚠ Permission issue - token may need 'admin:repo' or 'repo' scope with write access")
+                elif response.status_code == 404:
+                    print(f"      ⚠ Branch '{branch}' not found in target repository")
+                elif response.status_code == 422:
+                    print(f"      ⚠ Validation error - check that all required fields are present")
+                    print(f"      Payload sent: {json.dumps(payload, indent=2)[:500]}")
+            except Exception as e:
+                print(f"    ⚠ Failed to set protection for {branch}: HTTP {response.status_code}")
+                print(f"      Error parsing response: {str(e)}")
+                print(f"      Response: {response.text[:200]}")
             return False
     
     def get_repository_rulesets(self, org: str, repo_name: str) -> List[Dict]:
@@ -1182,12 +1235,21 @@ class GitHubMigrator:
                 print(f"  ✓ Variable {var['name']} created")
         
         # 10. List secrets
-        print("\n🔟 Listing repository secrets...")
+        print("\n🔟 Handling repository secrets...")
         secrets = self.get_repo_secrets(self.source_org, repo_name)
         if secrets:
-            print(f"  ⚠ Found {len(secrets)} secrets (require manual migration):")
+            print(f"  Found {len(secrets)} secrets in source repository")
+            print(f"  ⚠ Secrets CANNOT be automatically migrated (GitHub API security restriction)")
+            print(f"  GitHub does not allow reading secret values for security reasons")
+            print(f"  Secret names found:")
             for secret in secrets:
                 print(f"    - {secret}")
+            print(f"\n  📋 To migrate secrets manually:")
+            print(f"    1. Source: https://github.com/{self.source_org}/{repo_name}/settings/secrets/actions")
+            print(f"    2. Target: https://github.com/{self.target_org}/{repo_name}/settings/secrets/actions")
+            print(f"    3. For each secret above, copy the value from source and create it in target")
+        else:
+            print("  No secrets found in source repository")
         
         print(f"\n{'='*70}")
         print(f"✅ MIGRATION COMPLETED: {repo_name}")
