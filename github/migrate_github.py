@@ -94,6 +94,19 @@ class GitHubMigrator:
                 capture_output=True
             )
             
+            # Configure git for large repositories
+            print("  Configuring git for large push...")
+            subprocess.run(
+                ["git", "-C", repo_path, "config", "http.postBuffer", "524288000"],
+                check=True,
+                capture_output=True
+            )
+            subprocess.run(
+                ["git", "-C", repo_path, "config", "http.version", "HTTP/1.1"],
+                check=True,
+                capture_output=True
+            )
+            
             print("  Pushing to target repository...")
             subprocess.run(
                 ["git", "-C", repo_path, "push", "--mirror", target_url],
@@ -105,11 +118,56 @@ class GitHubMigrator:
             return True
             
         except subprocess.CalledProcessError as e:
-            print(f"✗ Git operation failed: {e.stderr.decode() if e.stderr else str(e)}")
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            print(f"✗ Git operation failed: {error_msg}")
+            
+            # Try alternative push method if mirror fails
+            if "postBuffer" in error_msg or "RPC failed" in error_msg:
+                print("  ⚠ Large repository detected, trying chunked push...")
+                return self.push_mirror_chunked(repo_path, target_url)
+            
             return False
         finally:
             if os.path.exists(repo_path):
                 subprocess.run(["rm", "-rf", repo_path], check=False)
+    
+    def push_mirror_chunked(self, repo_path: str, target_url: str) -> bool:
+        """Push repository in chunks (for large repos)"""
+        try:
+            print("  Pushing branches individually...")
+            
+            # Get all branches
+            result = subprocess.run(
+                ["git", "-C", repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            branches = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Push each branch
+            for branch in branches:
+                print(f"    Pushing branch: {branch}")
+                subprocess.run(
+                    ["git", "-C", repo_path, "push", target_url, f"refs/heads/{branch}"],
+                    check=True,
+                    capture_output=True
+                )
+            
+            # Push all tags
+            print("  Pushing tags...")
+            subprocess.run(
+                ["git", "-C", repo_path, "push", "--tags", target_url],
+                check=True,
+                capture_output=True
+            )
+            
+            print("✓ Repository pushed successfully (chunked)")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Chunked push failed: {e.stderr.decode() if e.stderr else str(e)}")
+            return False
     
     def create_target_repo(self, repo_name: str, settings: Dict) -> bool:
         """Create repository in target org"""
