@@ -6,6 +6,7 @@ Migrates repositories with FULL history including:
 - Pull Requests with comments, reviews, and status
 - Issues with comments
 - Repository settings, variables, secrets, webhooks
+- Branch protection rules (required reviews, status checks, restrictions, etc.)
 """
 
 import requests
@@ -528,6 +529,212 @@ class GitHubMigrator:
             return [secret["name"] for secret in response.json().get("secrets", [])]
         return []
     
+    def get_all_branches(self, org: str, repo_name: str) -> List[str]:
+        """Get all branches from repository"""
+        url = f"{self.base_url}/repos/{org}/{repo_name}/branches"
+        branches_data = self.paginated_request(url, self.source_headers)
+        return [branch["name"] for branch in branches_data]
+    
+    def get_branch_protection(self, org: str, repo_name: str, branch: str) -> Optional[Dict]:
+        """Get branch protection rules for a specific branch"""
+        url = f"{self.base_url}/repos/{org}/{repo_name}/branches/{branch}/protection"
+        response = requests.get(url, headers=self.source_headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            # Branch has no protection rules
+            return None
+        else:
+            print(f"    ⚠ Failed to get protection for {branch}: {response.status_code}")
+            return None
+    
+    def apply_branch_protection(self, repo_name: str, branch: str, protection_data: Dict) -> bool:
+        """Apply branch protection rules to a branch in target repository"""
+        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/branches/{branch}/protection"
+        
+        # Build the protection payload from source data
+        payload = {}
+        
+        # Required status checks
+        if "required_status_checks" in protection_data:
+            required_status_checks = protection_data["required_status_checks"]
+            if required_status_checks:
+                payload["required_status_checks"] = {
+                    "strict": required_status_checks.get("strict", False),
+                    "contexts": required_status_checks.get("contexts", [])
+                }
+            else:
+                payload["required_status_checks"] = None
+        
+        # Enforce admins
+        if "enforce_admins" in protection_data:
+            enforce_admins = protection_data["enforce_admins"]
+            payload["enforce_admins"] = enforce_admins.get("enabled", False) if enforce_admins else False
+        
+        # Required pull request reviews
+        if "required_pull_request_reviews" in protection_data:
+            required_pr_reviews = protection_data["required_pull_request_reviews"]
+            if required_pr_reviews:
+                pr_review_payload = {
+                    "dismiss_stale_reviews": required_pr_reviews.get("dismiss_stale_reviews", False),
+                    "require_code_owner_reviews": required_pr_reviews.get("require_code_owner_reviews", False),
+                    "required_approving_review_count": required_pr_reviews.get("required_approving_review_count", 1),
+                    "require_last_push_approval": required_pr_reviews.get("require_last_push_approval", False)
+                }
+                
+                # Handle dismissal restrictions
+                dismissal_restrictions = required_pr_reviews.get("dismissal_restrictions")
+                if dismissal_restrictions:
+                    pr_review_payload["dismissal_restrictions"] = {
+                        "users": [u["login"] for u in dismissal_restrictions.get("users", [])],
+                        "teams": [t["slug"] for t in dismissal_restrictions.get("teams", [])],
+                        "apps": [a["slug"] for a in dismissal_restrictions.get("apps", [])]
+                    }
+                else:
+                    pr_review_payload["dismissal_restrictions"] = None
+                
+                payload["required_pull_request_reviews"] = pr_review_payload
+            else:
+                payload["required_pull_request_reviews"] = None
+        
+        # Restrictions (who can push to this branch)
+        if "restrictions" in protection_data:
+            restrictions = protection_data["restrictions"]
+            if restrictions:
+                restriction_payload = {}
+                users = restrictions.get("users", [])
+                teams = restrictions.get("teams", [])
+                apps = restrictions.get("apps", [])
+                
+                if users:
+                    restriction_payload["users"] = [u["login"] for u in users]
+                if teams:
+                    restriction_payload["teams"] = [t["slug"] for t in teams]
+                if apps:
+                    restriction_payload["apps"] = [a["slug"] for a in apps]
+                
+                payload["restrictions"] = restriction_payload if restriction_payload else None
+            else:
+                payload["restrictions"] = None
+        
+        # Allow force pushes
+        if "allow_force_pushes" in protection_data:
+            payload["allow_force_pushes"] = protection_data.get("allow_force_pushes", {}).get("enabled", False) if protection_data.get("allow_force_pushes") else False
+        
+        # Allow deletions
+        if "allow_deletions" in protection_data:
+            payload["allow_deletions"] = protection_data.get("allow_deletions", {}).get("enabled", False) if protection_data.get("allow_deletions") else False
+        
+        # Required linear history
+        if "required_linear_history" in protection_data:
+            payload["required_linear_history"] = protection_data.get("required_linear_history", {}).get("enabled", False) if protection_data.get("required_linear_history") else False
+        
+        # Require signed commits
+        if "require_signed_commits" in protection_data:
+            payload["require_signed_commits"] = protection_data.get("require_signed_commits", {}).get("enabled", False) if protection_data.get("require_signed_commits") else False
+        
+        # Require conversation resolution
+        if "required_conversation_resolution" in protection_data:
+            payload["required_conversation_resolution"] = protection_data.get("required_conversation_resolution", {}).get("enabled", False) if protection_data.get("required_conversation_resolution") else False
+        
+        # Lock branch
+        if "lock_branch" in protection_data:
+            payload["lock_branch"] = protection_data.get("lock_branch", {}).get("enabled", False) if protection_data.get("lock_branch") else False
+        
+        # Require deployments
+        if "required_deployments" in protection_data:
+            required_deployments = protection_data["required_deployments"]
+            if required_deployments:
+                payload["required_deployments"] = {
+                    "enforcement_level": required_deployments.get("enforcement_level", "none"),
+                    "environments": required_deployments.get("environments", [])
+                }
+            else:
+                payload["required_deployments"] = None
+        
+        # Block creations
+        if "block_creations" in protection_data:
+            payload["block_creations"] = protection_data.get("block_creations", {}).get("enabled", False) if protection_data.get("block_creations") else False
+        
+        # Allow fork syncing
+        if "allow_fork_syncing" in protection_data:
+            payload["allow_fork_syncing"] = protection_data.get("allow_fork_syncing", {}).get("enabled", False) if protection_data.get("allow_fork_syncing") else False
+        
+        response = requests.put(url, headers=self.target_headers, json=payload)
+        
+        if response.status_code == 200:
+            return True
+        else:
+            try:
+                error_data = response.json()
+                error_msg = error_data.get("message", "Unknown error")
+            except:
+                error_msg = f"HTTP {response.status_code}"
+            print(f"    ⚠ Failed to apply protection to {branch}: {error_msg}")
+            return False
+    
+    def migrate_branch_protection(self, repo_name: str):
+        """Migrate branch protection rules from source to target repository"""
+        print(f"\n🛡️  Migrating Branch Protection Rules...")
+        
+        # Get all branches from source
+        source_branches = self.get_all_branches(self.source_org, repo_name)
+        print(f"  Found {len(source_branches)} branches in source repository")
+        
+        if not source_branches:
+            print("  No branches to check for protection rules")
+            return
+        
+        protected_branches = []
+        migrated_count = 0
+        failed_count = 0
+        
+        for branch in source_branches:
+            # Get protection rules for this branch
+            protection_data = self.get_branch_protection(self.source_org, repo_name, branch)
+            
+            if protection_data:
+                protected_branches.append(branch)
+                print(f"\n  Processing protection rules for branch: {branch}")
+                
+                # Apply protection rules to target
+                if self.apply_branch_protection(repo_name, branch, protection_data):
+                    migrated_count += 1
+                    print(f"    ✓ Protection rules applied to {branch}")
+                    
+                    # Print summary of protection settings
+                    if protection_data.get("required_pull_request_reviews"):
+                        reviews = protection_data["required_pull_request_reviews"]
+                        print(f"      - Required PR reviews: {reviews.get('required_approving_review_count', 1)}")
+                        if reviews.get("require_code_owner_reviews"):
+                            print(f"      - Requires code owner reviews")
+                    
+                    if protection_data.get("required_status_checks"):
+                        status_checks = protection_data["required_status_checks"]
+                        contexts = status_checks.get("contexts", [])
+                        if contexts:
+                            print(f"      - Required status checks: {len(contexts)} check(s)")
+                    
+                    if protection_data.get("required_linear_history", {}).get("enabled"):
+                        print(f"      - Requires linear history")
+                    
+                    if protection_data.get("require_signed_commits", {}).get("enabled"):
+                        print(f"      - Requires signed commits")
+                    
+                    time.sleep(0.5)  # Rate limiting
+                else:
+                    failed_count += 1
+                    print(f"    ✗ Failed to apply protection rules to {branch}")
+        
+        if not protected_branches:
+            print("  No branches have protection rules configured")
+        else:
+            print(f"\n✅ Branch Protection Migration Complete:")
+            print(f"  Protected branches found: {len(protected_branches)}")
+            print(f"  Successfully migrated: {migrated_count}")
+            print(f"  Failed: {failed_count}")
+    
     def migrate_repository(self, repo_name: str):
         """Complete migration of a repository"""
         print(f"\n{'='*70}")
@@ -552,21 +759,24 @@ class GitHubMigrator:
         print("\n4️⃣  Updating repository settings...")
         self.update_repo_settings(repo_name, source_settings)
         
-        # 5. Migrate Pull Requests
+        # 5. Migrate branch protection rules
+        self.migrate_branch_protection(repo_name)
+        
+        # 6. Migrate Pull Requests
         self.migrate_pull_requests(repo_name)
         
-        # 6. Migrate Issues
+        # 7. Migrate Issues
         self.migrate_issues(repo_name)
         
-        # 7. Migrate variables
-        print("\n7️⃣  Migrating repository variables...")
+        # 8. Migrate variables
+        print("\n8️⃣  Migrating repository variables...")
         variables = self.get_repo_variables(self.source_org, repo_name)
         for var in variables:
             if self.create_repo_variable(repo_name, var["name"], var["value"]):
                 print(f"  ✓ Variable {var['name']} created")
         
-        # 8. List secrets
-        print("\n8️⃣  Listing repository secrets...")
+        # 9. List secrets
+        print("\n9️⃣  Listing repository secrets...")
         secrets = self.get_repo_secrets(self.source_org, repo_name)
         if secrets:
             print(f"  ⚠ Found {len(secrets)} secrets (require manual migration):")
