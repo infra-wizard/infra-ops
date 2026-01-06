@@ -517,12 +517,17 @@ class GitHubMigrator:
         return failed_count == 0
     
     def get_all_pull_requests(self, org: str, repo_name: str) -> List[Dict]:
-        """Get all pull requests from source repository"""
+        """
+        Get all pull requests from source repository using GitHub REST API
+        Reference: https://docs.github.com/en/rest/pulls/pulls#list-pull-requests
+        """
         print(f"\n🔍 Fetching all pull requests...")
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls"
         
+        # Use state=all to get open, closed, and merged PRs
+        # Per GitHub API docs: state can be "open", "closed", or "all"
         prs = self.paginated_request(url, self.source_headers, {"state": "all"})
-        print(f"  Found {len(prs)} pull requests")
+        print(f"  Found {len(prs)} pull requests (open, closed, and merged)")
         return prs
     
     def get_pr_comments(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
@@ -546,17 +551,63 @@ class GitHubMigrator:
         response = requests.get(url, headers=self.target_headers)
         return response.status_code == 200
     
-    def create_pull_request(self, repo_name: str, pr_data: Dict) -> Optional[Dict]:
-        """Create a pull request in target repository"""
+    def create_branch_from_base(self, repo_name: str, new_branch: str, base_branch: str) -> bool:
+        """
+        Create a new branch from a base branch
+        Reference: https://docs.github.com/en/rest/git/refs#create-a-reference
+        """
+        # First, get the SHA of the base branch
+        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/git/ref/heads/{base_branch}"
+        response = requests.get(url, headers=self.target_headers)
+        
+        if response.status_code != 200:
+            print(f"      ⚠ Cannot create branch '{new_branch}' - base branch '{base_branch}' not found")
+            return False
+        
+        base_sha = response.json()["object"]["sha"]
+        
+        # Create the new branch
+        create_url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/git/refs"
+        payload = {
+            "ref": f"refs/heads/{new_branch}",
+            "sha": base_sha
+        }
+        
+        create_response = requests.post(create_url, headers=self.target_headers, json=payload)
+        
+        if create_response.status_code == 201:
+            print(f"      ✓ Created placeholder branch '{new_branch}' from '{base_branch}'")
+            return True
+        elif create_response.status_code == 422:
+            # Branch might already exist
+            if "already exists" in create_response.json().get("message", "").lower():
+                print(f"      ℹ️  Branch '{new_branch}' already exists")
+                return True
+        else:
+            error_msg = create_response.json().get('message', 'Unknown error')
+            print(f"      ⚠ Failed to create branch '{new_branch}': {error_msg}")
+            return False
+    
+    def create_pull_request(self, repo_name: str, pr_data: Dict, create_missing_branches: bool = True) -> Optional[Dict]:
+        """
+        Create a pull request in target repository
+        Reference: https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
+        """
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls"
         
         head_branch = pr_data["head"]["ref"]
         base_branch = pr_data["base"]["ref"]
         
-        # Check if branches exist before attempting to create PR
+        # Check if branches exist, create missing ones if requested
         if not self.branch_exists(repo_name, head_branch):
-            print(f"    ⚠ Head branch '{head_branch}' does not exist in target repo")
-            return None
+            if create_missing_branches:
+                print(f"    ℹ️  Head branch '{head_branch}' does not exist, creating placeholder...")
+                if not self.create_branch_from_base(repo_name, head_branch, base_branch):
+                    print(f"    ⚠ Cannot create PR - failed to create head branch '{head_branch}'")
+                    return None
+            else:
+                print(f"    ⚠ Head branch '{head_branch}' does not exist in target repo")
+                return None
         
         if not self.branch_exists(repo_name, base_branch):
             print(f"    ⚠ Base branch '{base_branch}' does not exist in target repo")
@@ -724,7 +775,6 @@ class GitHubMigrator:
         
         migrated_count = 0
         pr_count = 0
-        issue_count = 0
         failed_count = 0
         failed_prs = []
         
@@ -738,92 +788,18 @@ class GitHubMigrator:
                 new_pr = self.create_pull_request(repo_name, pr)
                 
                 if not new_pr:
-                    # Branches don't exist - create as closed issue to preserve history
-                    print(f"    ℹ️  Creating as closed issue (branches deleted)...")
-                    
-                    # Safely extract labels
-                    labels = []
-                    pr_labels = pr.get("labels", [])
-                    if isinstance(pr_labels, list):
-                        for label in pr_labels:
-                            if isinstance(label, dict):
-                                label_name = label.get("name")
-                                if label_name:
-                                    labels.append(label_name)
-                            elif isinstance(label, str):
-                                labels.append(label)
-                    
-                    labels.extend(["migrated-pr", "branches-deleted"])
-                    
-                    # Safely extract assignees
-                    assignees = []
-                    pr_assignees = pr.get("assignees", [])
-                    if isinstance(pr_assignees, list):
-                        for assignee in pr_assignees:
-                            if isinstance(assignee, dict):
-                                assignee_login = assignee.get("login")
-                                if assignee_login:
-                                    assignees.append(assignee)
-                            elif isinstance(assignee, str):
-                                assignees.append({"login": assignee})
-                    
-                    issue_data = {
-                        "title": f"[PR #{pr_number}] {pr.get('title', 'Untitled PR')}",
-                        "body": self.format_migrated_pr_as_issue_body(pr),
-                        "state": "closed",
-                        "labels": labels,
-                        "assignees": assignees
-                    }
-                    
-                    # Create issue instead of PR
-                    new_issue = self.create_issue(repo_name, issue_data)
-                    
-                    if new_issue:
-                        new_issue_number = new_issue["number"]
-                        print(f"    ✓ Created as closed Issue #{new_issue_number}")
-                        
-                        # Migrate all comments
-                        comments = self.get_pr_comments(self.source_org, repo_name, pr_number)
-                        if comments:
-                            print(f"    Migrating {len(comments)} comments...")
-                            for comment in comments:
-                                self.create_issue_comment(repo_name, new_issue_number, comment)
-                                time.sleep(0.5)
-                        
-                        # Migrate review comments
-                        review_comments = self.get_pr_review_comments(self.source_org, repo_name, pr_number)
-                        if review_comments:
-                            print(f"    Found {len(review_comments)} review comments")
-                            summary = self.create_review_summary(review_comments)
-                            self.create_issue_comment(repo_name, new_issue_number, {
-                                "user": {"login": "migration-bot"},
-                                "created_at": datetime.now().isoformat(),
-                                "body": summary
-                            })
-                        
-                        # Migrate reviews
-                        reviews = self.get_pr_reviews(self.source_org, repo_name, pr_number)
-                        if reviews:
-                            print(f"    Found {len(reviews)} reviews")
-                            review_summary = self.create_reviews_summary(reviews)
-                            self.create_issue_comment(repo_name, new_issue_number, {
-                                "user": {"login": "migration-bot"},
-                                "created_at": datetime.now().isoformat(),
-                                "body": review_summary
-                            })
-                        
-                        migrated_count += 1
-                        issue_count += 1
-                    else:
-                        failed_count += 1
-                        head_branch = pr.get("head", {}).get("ref", "unknown")
-                        base_branch = pr.get("base", {}).get("ref", "unknown")
-                        failed_prs.append({
-                            "number": pr_number,
-                            "title": pr.get("title", "")[:50],
-                            "head": head_branch,
-                            "base": base_branch
-                        })
+                    # PR creation failed - log it but don't create as issue
+                    # All PRs should appear in Pull Requests section, not Issues
+                    failed_count += 1
+                    head_branch = pr.get("head", {}).get("ref", "unknown")
+                    base_branch = pr.get("base", {}).get("ref", "unknown")
+                    failed_prs.append({
+                        "number": pr_number,
+                        "title": pr.get("title", "")[:50],
+                        "head": head_branch,
+                        "base": base_branch
+                    })
+                    print(f"    ⚠ PR could not be created - will not appear in Pull Requests section")
                     continue
                 
                 new_pr_number = new_pr["number"]
@@ -884,10 +860,9 @@ class GitHubMigrator:
                 failed_count += 1
         
         print(f"\n✅ Pull Request Migration Complete:")
-        print(f"  Migrated as PRs: {pr_count}")
-        print(f"  Migrated as Issues (branches deleted): {issue_count}")
-        print(f"  Total migrated: {migrated_count}")
-        print(f"  Failed: {failed_count}")
+        print(f"  Successfully migrated as PRs: {pr_count}")
+        print(f"  Total processed: {migrated_count}")
+        print(f"  Failed (branches missing): {failed_count}")
         
         if failed_prs:
             print(f"\n  ⚠ Failed PRs (could not be migrated):")
