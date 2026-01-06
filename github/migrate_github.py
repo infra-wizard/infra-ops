@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-Complete GitHub Repository Migration Script with Separate Source/Target Tokens
+Complete GitHub Repository Migration Script
 Migrates repositories with FULL history including:
 - Commits, branches, tags (via git mirror)
-- Pull Requests (open, closed, merged) with comments, reviews, labels, assignees
-- Issues with comments, labels, assignees
-- Repository settings (merge options, default branch)
-- Branch protection rules (required reviews, status checks, restrictions)
-- Labels (colors and descriptions)
-- Webhooks (configuration, note: secrets require manual setup)
-- Repository variables (Actions)
-- Repository secrets (listed, require manual migration)
+- Pull Requests with comments, reviews, and status
+- Issues with comments
+- Repository settings, variables, secrets, webhooks
 """
 
 import requests
@@ -21,33 +16,21 @@ import time
 from typing import Dict, List, Optional
 import sys
 from datetime import datetime
-import argparse
 
 class GitHubMigrator:
-    def __init__(self, source_token: str, target_token: str, source_org: str, target_org: str):
-        self.source_token = source_token
-        self.target_token = target_token
+    def __init__(self, token: str, source_org: str, target_org: str):
+        self.token = token
         self.source_org = source_org
         self.target_org = target_org
-        
-        # Headers for source org
-        self.source_headers = {
-            "Authorization": f"Bearer {source_token}",
+        self.headers = {
+            "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
-        
-        # Headers for target org
-        self.target_headers = {
-            "Authorization": f"Bearer {target_token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28"
-        }
-        
         self.base_url = "https://api.github.com"
     
-    def paginated_request(self, url: str, headers: Dict, params: Dict = None) -> List:
-        """Make paginated API requests with specified headers"""
+    def paginated_request(self, url: str, params: Dict = None) -> List:
+        """Make paginated API requests"""
         results = []
         page = 1
         params = params or {}
@@ -56,7 +39,7 @@ class GitHubMigrator:
             params["per_page"] = 100
             params["page"] = page
             
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=self.headers, params=params)
             
             if response.status_code != 200:
                 break
@@ -84,8 +67,8 @@ class GitHubMigrator:
         """Clone repository with full history and push to target"""
         print(f"\n📦 Cloning repository with full history...")
         
-        source_url = f"https://{self.source_token}@github.com/{self.source_org}/{repo_name}.git"
-        target_url = f"https://{self.target_token}@github.com/{self.target_org}/{repo_name}.git"
+        source_url = f"https://{self.token}@github.com/{self.source_org}/{repo_name}.git"
+        target_url = f"https://{self.token}@github.com/{self.target_org}/{repo_name}.git"
         
         repo_path = os.path.join(temp_dir, repo_name)
         
@@ -95,19 +78,6 @@ class GitHubMigrator:
             print("  Cloning with --mirror flag...")
             subprocess.run(
                 ["git", "clone", "--mirror", source_url, repo_path],
-                check=True,
-                capture_output=True
-            )
-            
-            # Configure git for large repositories
-            print("  Configuring git for large push...")
-            subprocess.run(
-                ["git", "-C", repo_path, "config", "http.postBuffer", "524288000"],
-                check=True,
-                capture_output=True
-            )
-            subprocess.run(
-                ["git", "-C", repo_path, "config", "http.version", "HTTP/1.1"],
                 check=True,
                 capture_output=True
             )
@@ -123,56 +93,11 @@ class GitHubMigrator:
             return True
             
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode() if e.stderr else str(e)
-            print(f"✗ Git operation failed: {error_msg}")
-            
-            # Try alternative push method if mirror fails
-            if "postBuffer" in error_msg or "RPC failed" in error_msg:
-                print("  ⚠ Large repository detected, trying chunked push...")
-                return self.push_mirror_chunked(repo_path, target_url)
-            
+            print(f"✗ Git operation failed: {e.stderr.decode() if e.stderr else str(e)}")
             return False
         finally:
             if os.path.exists(repo_path):
                 subprocess.run(["rm", "-rf", repo_path], check=False)
-    
-    def push_mirror_chunked(self, repo_path: str, target_url: str) -> bool:
-        """Push repository in chunks (for large repos)"""
-        try:
-            print("  Pushing branches individually...")
-            
-            # Get all branches
-            result = subprocess.run(
-                ["git", "-C", repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            branches = result.stdout.strip().split('\n') if result.stdout.strip() else []
-            
-            # Push each branch
-            for branch in branches:
-                print(f"    Pushing branch: {branch}")
-                subprocess.run(
-                    ["git", "-C", repo_path, "push", target_url, f"refs/heads/{branch}"],
-                    check=True,
-                    capture_output=True
-                )
-            
-            # Push all tags
-            print("  Pushing tags...")
-            subprocess.run(
-                ["git", "-C", repo_path, "push", "--tags", target_url],
-                check=True,
-                capture_output=True
-            )
-            
-            print("✓ Repository pushed successfully (chunked)")
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            print(f"✗ Chunked push failed: {e.stderr.decode() if e.stderr else str(e)}")
-            return False
     
     def create_target_repo(self, repo_name: str, settings: Dict) -> bool:
         """Create repository in target org"""
@@ -187,7 +112,7 @@ class GitHubMigrator:
             "has_wiki": settings.get("has_wiki", True),
         }
         
-        response = requests.post(url, headers=self.target_headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload)
         
         if response.status_code == 201:
             print(f"✓ Repository created in target org")
@@ -199,11 +124,10 @@ class GitHubMigrator:
             print(f"✗ Failed to create repository: {response.json()}")
             return False
     
-    def get_repo_settings(self, org: str, repo_name: str, use_source: bool = True) -> Dict:
+    def get_repo_settings(self, org: str, repo_name: str) -> Dict:
         """Get repository settings"""
         url = f"{self.base_url}/repos/{org}/{repo_name}"
-        headers = self.source_headers if use_source else self.target_headers
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=self.headers)
         
         if response.status_code == 200:
             return response.json()
@@ -227,444 +151,52 @@ class GitHubMigrator:
             "delete_branch_on_merge": settings.get("delete_branch_on_merge"),
         }
         
-        response = requests.patch(url, headers=self.target_headers, json=update_settings)
+        response = requests.patch(url, headers=self.headers, json=update_settings)
         return response.status_code == 200
     
-    def update_default_branch(self, repo_name: str, default_branch: str) -> bool:
-        """Update default branch of repository"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}"
-        
-        payload = {"default_branch": default_branch}
-        response = requests.patch(url, headers=self.target_headers, json=payload)
-        
-        if response.status_code == 200:
-            print(f"  ✓ Default branch set to: {default_branch}")
-            return True
-        else:
-            print(f"  ⚠ Failed to set default branch: {response.json().get('message', 'Unknown error')}")
-            return False
-    
-    def get_all_branches(self, org: str, repo_name: str) -> List[str]:
-        """Get all branches from repository"""
-        url = f"{self.base_url}/repos/{org}/{repo_name}/branches"
-        branches_data = self.paginated_request(url, self.source_headers)
-        return [branch["name"] for branch in branches_data]
-    
-    def get_branch_protection(self, org: str, repo_name: str, branch: str) -> Optional[Dict]:
-        """Get branch protection rules for a branch"""
-        url = f"{self.base_url}/repos/{org}/{repo_name}/branches/{branch}/protection"
-        response = requests.get(url, headers=self.source_headers)
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 404:
-            return None  # No protection rules
-        else:
-            print(f"  ⚠ Error fetching protection for {branch}: {response.json().get('message', 'Unknown error')}")
-            return None
-    
-    def set_branch_protection(self, repo_name: str, branch: str, protection_data: Dict) -> bool:
-        """Set branch protection rules"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/branches/{branch}/protection"
-        
-        # Build protection payload from source data
-        payload = {}
-        
-        # Required status checks
-        if "required_status_checks" in protection_data:
-            required_status_checks = protection_data["required_status_checks"]
-            payload["required_status_checks"] = {
-                "strict": required_status_checks.get("strict", False),
-                "contexts": required_status_checks.get("contexts", [])
-            }
-        
-        # Enforce admins
-        if "enforce_admins" in protection_data:
-            payload["enforce_admins"] = protection_data["enforce_admins"]["enabled"]
-        
-        # Required pull request reviews
-        if "required_pull_request_reviews" in protection_data:
-            required_reviews = protection_data["required_pull_request_reviews"]
-            review_payload = {
-                "dismiss_stale_reviews": required_reviews.get("dismiss_stale_reviews", False),
-                "require_code_owner_reviews": required_reviews.get("require_code_owner_reviews", False),
-                "required_approving_review_count": required_reviews.get("required_approving_review_count", 1),
-                "require_last_push_approval": required_reviews.get("require_last_push_approval", False),
-            }
-            
-            # Only include restrictions if they exist and have content
-            # GitHub API requires these to be omitted if empty, not included as empty objects
-            dismissal_restrictions = required_reviews.get("dismissal_restrictions")
-            if dismissal_restrictions and (dismissal_restrictions.get("users") or dismissal_restrictions.get("teams")):
-                users = [u["login"] for u in dismissal_restrictions.get("users", []) if isinstance(u, dict) and "login" in u]
-                teams = [t["slug"] for t in dismissal_restrictions.get("teams", []) if isinstance(t, dict) and "slug" in t]
-                if users or teams:
-                    review_payload["dismissal_restrictions"] = {}
-                    if users:
-                        review_payload["dismissal_restrictions"]["users"] = users
-                    if teams:
-                        review_payload["dismissal_restrictions"]["teams"] = teams
-            
-            # Only include bypass allowances if they exist and have content
-            bypass_allowances = required_reviews.get("bypass_pull_request_allowances")
-            if bypass_allowances and (bypass_allowances.get("users") or bypass_allowances.get("teams")):
-                users = [u["login"] for u in bypass_allowances.get("users", []) if isinstance(u, dict) and "login" in u]
-                teams = [t["slug"] for t in bypass_allowances.get("teams", []) if isinstance(t, dict) and "slug" in t]
-                if users or teams:
-                    review_payload["bypass_pull_request_allowances"] = {}
-                    if users:
-                        review_payload["bypass_pull_request_allowances"]["users"] = users
-                    if teams:
-                        review_payload["bypass_pull_request_allowances"]["teams"] = teams
-            
-            payload["required_pull_request_reviews"] = review_payload
-        
-        # Restrictions
-        if "restrictions" in protection_data:
-            restrictions = protection_data["restrictions"]
-            users = [u["login"] for u in restrictions.get("users", []) if isinstance(u, dict) and "login" in u]
-            teams = [t["slug"] for t in restrictions.get("teams", []) if isinstance(t, dict) and "slug" in t]
-            apps = [a["slug"] for a in restrictions.get("apps", []) if isinstance(a, dict) and "slug" in a]
-            
-            if users or teams or apps:
-                payload["restrictions"] = {}
-                if users:
-                    payload["restrictions"]["users"] = users
-                if teams:
-                    payload["restrictions"]["teams"] = teams
-                if apps:
-                    payload["restrictions"]["apps"] = apps
-        
-        # Allow force pushes
-        if "allow_force_pushes" in protection_data:
-            payload["allow_force_pushes"] = protection_data["allow_force_pushes"]["enabled"]
-        
-        # Allow deletions
-        if "allow_deletions" in protection_data:
-            payload["allow_deletions"] = protection_data["allow_deletions"]["enabled"]
-        
-        # Required linear history
-        if "required_linear_history" in protection_data:
-            payload["required_linear_history"] = protection_data["required_linear_history"]["enabled"]
-        
-        # Require signed commits
-        if "require_signed_commits" in protection_data:
-            payload["require_signed_commits"] = protection_data["require_signed_commits"]["enabled"]
-        
-        # Require conversation resolution
-        if "required_conversation_resolution" in protection_data:
-            payload["required_conversation_resolution"] = protection_data["required_conversation_resolution"]["enabled"]
-        
-        # Lock branch
-        if "lock_branch" in protection_data:
-            payload["lock_branch"] = protection_data["lock_branch"]["enabled"]
-        
-        # Require deployments to succeed
-        if "required_deployments" in protection_data:
-            payload["required_deployments"] = {
-                "enforcement_level": protection_data["required_deployments"].get("enforcement_level", "none"),
-                "environments": protection_data["required_deployments"].get("environments", [])
-            }
-        
-        # GitHub requires at least one rule in the payload
-        if not payload:
-            print(f"    ⚠ No protection rules to apply for {branch} (empty payload)")
-            print(f"      Protection data keys: {list(protection_data.keys())}")
-            return False
-        
-        # Debug: Show what we're setting
-        print(f"      Applying protection rules: {', '.join(payload.keys())}")
-        
-        response = requests.put(url, headers=self.target_headers, json=payload)
-        
-        if response.status_code == 200:
-            print(f"    ✓ Protection rules applied to {branch}")
-            return True
-        else:
-            try:
-                error_data = response.json()
-                error_msg = error_data.get('message', 'Unknown error')
-                errors = error_data.get('errors', [])
-                if errors:
-                    error_details = '; '.join([f"{e.get('field', '')}: {e.get('message', '')}" for e in errors])
-                    error_msg = f"{error_msg} ({error_details})"
-                print(f"    ⚠ Failed to set protection for {branch}: {error_msg}")
-                print(f"      Response status: {response.status_code}")
-                if response.status_code == 403:
-                    print(f"      ⚠ Permission issue - token may need 'admin:repo' or 'repo' scope with write access")
-                elif response.status_code == 404:
-                    print(f"      ⚠ Branch '{branch}' not found in target repository")
-                elif response.status_code == 422:
-                    print(f"      ⚠ Validation error - check that all required fields are present")
-                    print(f"      Payload sent: {json.dumps(payload, indent=2)[:500]}")
-            except Exception as e:
-                print(f"    ⚠ Failed to set protection for {branch}: HTTP {response.status_code}")
-                print(f"      Error parsing response: {str(e)}")
-                print(f"      Response: {response.text[:200]}")
-            return False
-    
-    def get_repository_rulesets(self, org: str, repo_name: str) -> List[Dict]:
-        """Get repository rulesets (pattern-based branch protection rules)"""
-        url = f"{self.base_url}/repos/{org}/{repo_name}/rulesets"
-        response = requests.get(url, headers=self.source_headers)
-        
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 404:
-            return []
-        else:
-            print(f"  ⚠ Error fetching rulesets: {response.json().get('message', 'Unknown error')}")
-            return []
-    
-    def create_repository_ruleset(self, repo_name: str, ruleset_data: Dict) -> bool:
-        """Create a repository ruleset in target repository"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/rulesets"
-        
-        # Build ruleset payload from source data
-        payload = {
-            "name": ruleset_data.get("name", ""),
-            "target": ruleset_data.get("target", "branch"),
-            "enforcement": ruleset_data.get("enforcement", "active"),
-            "conditions": ruleset_data.get("conditions", {}),
-            "rules": ruleset_data.get("rules", [])
-        }
-        
-        # Include bypass_actors if present
-        if "bypass_actors" in ruleset_data:
-            payload["bypass_actors"] = ruleset_data["bypass_actors"]
-        
-        response = requests.post(url, headers=self.target_headers, json=payload)
-        
-        if response.status_code == 201:
-            print(f"    ✓ Ruleset '{ruleset_data.get('name', 'unnamed')}' created")
-            return True
-        else:
-            error_msg = response.json().get('message', 'Unknown error')
-            print(f"    ⚠ Failed to create ruleset '{ruleset_data.get('name', 'unnamed')}': {error_msg}")
-            return False
-    
-    def migrate_branch_protection(self, repo_name: str, default_branch: str) -> bool:
-        """Migrate branch protection rules for ALL branches"""
-        print(f"\n🛡️  Migrating branch protection rules...")
-        
-        # First, try to get repository rulesets (newer pattern-based approach)
-        print(f"  Checking for repository rulesets (pattern-based rules)...")
-        rulesets = self.get_repository_rulesets(self.source_org, repo_name)
-        
-        if rulesets:
-            print(f"  Found {len(rulesets)} ruleset(s)")
-            for ruleset in rulesets:
-                ruleset_name = ruleset.get("name", "unnamed")
-                target = ruleset.get("target", "branch")
-                print(f"    - Ruleset: {ruleset_name} (target: {target})")
-                
-                # Migrate ruleset
-                if self.create_repository_ruleset(repo_name, ruleset):
-                    time.sleep(0.5)  # Rate limiting
-        
-        # Also check individual branch protection (older approach)
-        print(f"\n  Checking individual branch protection rules...")
-        
-        # Get all branches from source repository
-        print(f"  Fetching all branches...")
-        all_branches = self.get_all_branches(self.source_org, repo_name)
-        print(f"  Found {len(all_branches)} branches")
-        
-        protected_branches = []
-        migrated_count = 0
-        failed_count = 0
-        
-        # Check each branch for protection rules
-        print(f"  Checking each branch for protection rules...")
-        for i, branch in enumerate(all_branches, 1):
-            protection = self.get_branch_protection(self.source_org, repo_name, branch)
-            if protection:
-                protected_branches.append((branch, protection))
-                print(f"  [{i}/{len(all_branches)}] ✓ Found protection rules for branch: {branch}")
-            time.sleep(0.1)  # Small delay to avoid rate limiting
-        
-        if not protected_branches:
-            if not rulesets:
-                print(f"  No branch protection rules found")
-            return True
-        
-        print(f"\n  Migrating protection rules for {len(protected_branches)} branch(es)...")
-        
-        # Migrate protection rules for each protected branch
-        for branch, protection in protected_branches:
-            print(f"    Migrating protection for branch: {branch}...")
-            
-            # Check if branch exists in target repository
-            if not self.branch_exists(repo_name, branch):
-                print(f"      ⚠ Branch '{branch}' does not exist in target repo, skipping protection")
-                failed_count += 1
-                continue
-            
-            if self.set_branch_protection(repo_name, branch, protection):
-                migrated_count += 1
-                print(f"      ✓ Successfully migrated protection for {branch}")
-            else:
-                failed_count += 1
-                print(f"      ✗ Failed to migrate protection for {branch}")
-            time.sleep(0.5)  # Rate limiting
-        
-        print(f"\n  ✅ Branch Protection Migration Summary:")
-        if rulesets:
-            print(f"    Rulesets migrated: {len(rulesets)}")
-        print(f"    Individual branch rules migrated: {migrated_count}")
-        print(f"    Failed: {failed_count}")
-        
-        return failed_count == 0
-    
     def get_all_pull_requests(self, org: str, repo_name: str) -> List[Dict]:
-        """
-        Get all pull requests from source repository using GitHub REST API
-        Reference: https://docs.github.com/en/rest/pulls/pulls#list-pull-requests
-        """
+        """Get all pull requests from source repository"""
         print(f"\n🔍 Fetching all pull requests...")
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls"
         
-        # Use state=all to get open, closed, and merged PRs
-        # Per GitHub API docs: state can be "open", "closed", or "all"
-        prs = self.paginated_request(url, self.source_headers, {"state": "all"})
-        print(f"  Found {len(prs)} pull requests (open, closed, and merged)")
+        prs = self.paginated_request(url, {"state": "all"})
+        print(f"  Found {len(prs)} pull requests")
         return prs
     
     def get_pr_comments(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all comments for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/issues/{pr_number}/comments"
-        return self.paginated_request(url, self.source_headers)
+        return self.paginated_request(url)
     
     def get_pr_review_comments(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all review comments (line comments) for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls/{pr_number}/comments"
-        return self.paginated_request(url, self.source_headers)
+        return self.paginated_request(url)
     
     def get_pr_reviews(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all reviews for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls/{pr_number}/reviews"
-        return self.paginated_request(url, self.source_headers)
+        return self.paginated_request(url)
     
-    def branch_exists(self, repo_name: str, branch: str) -> bool:
-        """Check if a branch exists in target repository"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/branches/{branch}"
-        response = requests.get(url, headers=self.target_headers)
-        return response.status_code == 200
-    
-    def create_branch_from_base(self, repo_name: str, new_branch: str, base_branch: str) -> bool:
-        """
-        Create a new branch from a base branch
-        Reference: https://docs.github.com/en/rest/git/refs#create-a-reference
-        """
-        # First, get the SHA of the base branch
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/git/ref/heads/{base_branch}"
-        response = requests.get(url, headers=self.target_headers)
-        
-        if response.status_code != 200:
-            print(f"      ⚠ Cannot create branch '{new_branch}' - base branch '{base_branch}' not found")
-            return False
-        
-        base_sha = response.json()["object"]["sha"]
-        
-        # Create the new branch
-        create_url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/git/refs"
-        payload = {
-            "ref": f"refs/heads/{new_branch}",
-            "sha": base_sha
-        }
-        
-        create_response = requests.post(create_url, headers=self.target_headers, json=payload)
-        
-        if create_response.status_code == 201:
-            print(f"      ✓ Created placeholder branch '{new_branch}' from '{base_branch}'")
-            return True
-        elif create_response.status_code == 422:
-            # Branch might already exist
-            if "already exists" in create_response.json().get("message", "").lower():
-                print(f"      ℹ️  Branch '{new_branch}' already exists")
-                return True
-        else:
-            error_msg = create_response.json().get('message', 'Unknown error')
-            print(f"      ⚠ Failed to create branch '{new_branch}': {error_msg}")
-            return False
-    
-    def create_pull_request(self, repo_name: str, pr_data: Dict, create_missing_branches: bool = True) -> Optional[Dict]:
-        """
-        Create a pull request in target repository
-        Reference: https://docs.github.com/en/rest/pulls/pulls#create-a-pull-request
-        """
+    def create_pull_request(self, repo_name: str, pr_data: Dict) -> Optional[Dict]:
+        """Create a pull request in target repository"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls"
-        
-        head_branch = pr_data["head"]["ref"]
-        base_branch = pr_data["base"]["ref"]
-        
-        # Check if branches exist, create missing ones if requested
-        if not self.branch_exists(repo_name, head_branch):
-            if create_missing_branches:
-                print(f"    ℹ️  Head branch '{head_branch}' does not exist, creating placeholder...")
-                if not self.create_branch_from_base(repo_name, head_branch, base_branch):
-                    print(f"    ⚠ Cannot create PR - failed to create head branch '{head_branch}'")
-                    return None
-            else:
-                print(f"    ⚠ Head branch '{head_branch}' does not exist in target repo")
-                return None
-        
-        if not self.branch_exists(repo_name, base_branch):
-            print(f"    ⚠ Base branch '{base_branch}' does not exist in target repo")
-            return None
         
         # Extract only the necessary fields
         payload = {
             "title": pr_data["title"],
             "body": self.format_migrated_body(pr_data.get("body", ""), pr_data),
-            "head": head_branch,
-            "base": base_branch,
+            "head": pr_data["head"]["ref"],
+            "base": pr_data["base"]["ref"],
         }
         
-        # Add labels if present
-        if "labels" in pr_data and pr_data["labels"]:
-            payload["labels"] = [label["name"] for label in pr_data["labels"]]
-        
-        response = requests.post(url, headers=self.target_headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload)
         
         if response.status_code == 201:
-            new_pr = response.json()
-            
-            # Add assignees if present
-            if "assignees" in pr_data and pr_data["assignees"]:
-                assignees = [assignee["login"] for assignee in pr_data["assignees"]]
-                self.add_issue_assignees(repo_name, new_pr["number"], assignees)
-            
-            # Add milestone if present
-            if "milestone" in pr_data and pr_data["milestone"]:
-                milestone_number = pr_data["milestone"]["number"]
-                # Note: Milestones need to be migrated first, this is a placeholder
-                # We'll handle milestone migration separately
-            
-            return new_pr
+            return response.json()
         else:
-            error_data = response.json()
-            error_msg = error_data.get('message', 'Unknown error')
-            errors = error_data.get('errors', [])
-            if errors:
-                error_details = '; '.join([f"{e.get('field', '')}: {e.get('message', '')}" for e in errors])
-                error_msg = f"{error_msg} ({error_details})"
-            print(f"    ⚠ Failed to create PR #{pr_data['number']}: {error_msg}")
+            print(f"  ⚠ Failed to create PR #{pr_data['number']}: {response.json().get('message', 'Unknown error')}")
             return None
-    
-    def add_issue_assignees(self, repo_name: str, issue_number: int, assignees: List[str]) -> bool:
-        """Add assignees to an issue or PR"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}/assignees"
-        payload = {"assignees": assignees}
-        response = requests.post(url, headers=self.target_headers, json=payload)
-        return response.status_code == 201
-    
-    def merge_pull_request(self, repo_name: str, pr_number: int, merge_method: str = "merge") -> bool:
-        """Merge a pull request"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls/{pr_number}/merge"
-        payload = {"merge_method": merge_method}  # merge, squash, or rebase
-        response = requests.put(url, headers=self.target_headers, json=payload)
-        return response.status_code == 200
     
     def format_migrated_body(self, body: str, original_data: Dict) -> str:
         """Format body with migration metadata"""
@@ -679,78 +211,14 @@ class GitHubMigrator:
 """
         return metadata + (body or "")
     
-    def format_migrated_pr_as_issue_body(self, pr_data: Dict) -> str:
-        """Format PR body as issue when branches don't exist"""
-        # Safe access to nested dictionaries
-        head_data = pr_data.get("head", {})
-        if isinstance(head_data, dict):
-            head_branch = head_data.get("ref", "unknown")
-            head_repo = head_data.get("repo", {})
-            if isinstance(head_repo, dict):
-                repo_name = head_repo.get("name", "unknown")
-            else:
-                repo_name = "unknown"
-        else:
-            head_branch = "unknown"
-            repo_name = "unknown"
-        
-        base_data = pr_data.get("base", {})
-        if isinstance(base_data, dict):
-            base_branch = base_data.get("ref", "unknown")
-        else:
-            base_branch = "unknown"
-        
-        merged_at = pr_data.get("merged_at")
-        closed_at = pr_data.get("closed_at")
-        
-        # Safe access to user data
-        user_data = pr_data.get("user", {})
-        if isinstance(user_data, dict):
-            user_login = user_data.get("login", "unknown")
-        else:
-            user_login = "unknown"
-        
-        pr_number = pr_data.get("number", "unknown")
-        created_at = pr_data.get("created_at", "unknown")
-        state = pr_data.get("state", "unknown")
-        body = pr_data.get("body", "") or ""
-        
-        metadata = f"""
----
-**⚠️ MIGRATED PR (Branches Deleted)**
-**🔄 Migrated from:** {self.source_org}/{repo_name}
-**📅 Original PR:** #{pr_number} by @{user_login}
-**📝 Created:** {created_at}
-**✅ Status:** {state} {'(merged)' if merged_at else ''}
-**🔀 Head Branch:** `{head_branch}` (deleted)
-**🔀 Base Branch:** `{base_branch}`
-{f"**✅ Merged:** {merged_at}" if merged_at else ""}
-{f"**❌ Closed:** {closed_at}" if closed_at and not merged_at else ""}
----
-
-**Note:** This PR was migrated as a closed issue because the source branches no longer exist in the target repository. All comments and reviews from the original PR are preserved below.
-
-"""
-        return metadata + body
-    
     def create_issue_comment(self, repo_name: str, issue_number: int, comment: Dict) -> bool:
         """Create a comment on an issue/PR"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}/comments"
         
-        # Safe access to comment data
-        user_data = comment.get("user", {})
-        if isinstance(user_data, dict):
-            user_login = user_data.get("login", "unknown")
-        else:
-            user_login = "unknown"
-        
-        created_at = comment.get("created_at", "unknown")
-        comment_body = comment.get("body", "")
-        
-        body = f"**@{user_login}** commented on {created_at}:\n\n{comment_body}"
+        body = f"**@{comment['user']['login']}** commented on {comment['created_at']}:\n\n{comment.get('body', '')}"
         
         payload = {"body": body}
-        response = requests.post(url, headers=self.target_headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload)
         
         return response.status_code == 201
     
@@ -759,7 +227,7 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls/{pr_number}"
         
         payload = {"state": "closed"}
-        response = requests.patch(url, headers=self.target_headers, json=payload)
+        response = requests.patch(url, headers=self.headers, json=payload)
         
         return response.status_code == 200
     
@@ -774,9 +242,7 @@ class GitHubMigrator:
             return
         
         migrated_count = 0
-        pr_count = 0
         failed_count = 0
-        failed_prs = []
         
         for pr in source_prs:
             pr_number = pr["number"]
@@ -788,23 +254,12 @@ class GitHubMigrator:
                 new_pr = self.create_pull_request(repo_name, pr)
                 
                 if not new_pr:
-                    # PR creation failed - log it but don't create as issue
-                    # All PRs should appear in Pull Requests section, not Issues
                     failed_count += 1
-                    head_branch = pr.get("head", {}).get("ref", "unknown")
-                    base_branch = pr.get("base", {}).get("ref", "unknown")
-                    failed_prs.append({
-                        "number": pr_number,
-                        "title": pr.get("title", "")[:50],
-                        "head": head_branch,
-                        "base": base_branch
-                    })
-                    print(f"    ⚠ PR could not be created - will not appear in Pull Requests section")
+                    print(f"    ⚠ Skipping PR #{pr_number} (branches may not exist)")
                     continue
                 
                 new_pr_number = new_pr["number"]
                 print(f"    ✓ Created as PR #{new_pr_number}")
-                pr_count += 1
                 
                 # Migrate general comments
                 comments = self.get_pr_comments(self.source_org, repo_name, pr_number)
@@ -836,23 +291,12 @@ class GitHubMigrator:
                         "body": review_summary
                     })
                 
-                # Handle PR state (closed or merged)
+                # Close PR if it was closed/merged in source
                 if pr["state"] == "closed":
-                    if pr.get("merged_at"):  # PR was merged
-                        # Try to merge the PR (if branches still exist)
-                        merge_method = "merge"  # Default, could be determined from PR data
-                        if self.merge_pull_request(repo_name, new_pr_number, merge_method):
-                            print(f"    ✓ Merged PR #{new_pr_number}")
-                        else:
-                            # If merge fails (e.g., branches deleted), just close it
-                            self.close_pull_request(repo_name, new_pr_number)
-                            print(f"    ✓ Closed PR #{new_pr_number} (merge attempted but failed)")
-                    else:  # PR was just closed
-                        self.close_pull_request(repo_name, new_pr_number)
-                        print(f"    ✓ Closed PR #{new_pr_number}")
+                    self.close_pull_request(repo_name, new_pr_number)
+                    print(f"    ✓ Closed PR #{new_pr_number}")
                 
                 migrated_count += 1
-                pr_count += 1
                 time.sleep(1)  # Rate limiting
                 
             except Exception as e:
@@ -860,16 +304,8 @@ class GitHubMigrator:
                 failed_count += 1
         
         print(f"\n✅ Pull Request Migration Complete:")
-        print(f"  Successfully migrated as PRs: {pr_count}")
-        print(f"  Total processed: {migrated_count}")
-        print(f"  Failed (branches missing): {failed_count}")
-        
-        if failed_prs:
-            print(f"\n  ⚠ Failed PRs (could not be migrated):")
-            for failed_pr in failed_prs[:10]:  # Show first 10
-                print(f"    - PR #{failed_pr['number']}: {failed_pr['title']} (head: {failed_pr['head']}, base: {failed_pr['base']})")
-            if len(failed_prs) > 10:
-                print(f"    ... and {len(failed_prs) - 10} more")
+        print(f"  Migrated: {migrated_count}")
+        print(f"  Failed: {failed_count}")
     
     def create_review_summary(self, review_comments: List[Dict]) -> str:
         """Create a summary of review comments"""
@@ -910,7 +346,7 @@ class GitHubMigrator:
         """Get all issues (excluding PRs)"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/issues"
         
-        all_issues = self.paginated_request(url, self.source_headers, {"state": "all"})
+        all_issues = self.paginated_request(url, {"state": "all"})
         
         # Filter out pull requests
         issues = [issue for issue in all_issues if "pull_request" not in issue]
@@ -920,56 +356,16 @@ class GitHubMigrator:
         """Create an issue in target repository"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues"
         
-        # Use custom body if provided (for PRs converted to issues), otherwise format it
-        body = issue_data.get("body") or self.format_migrated_issue_body(issue_data)
-        
-        # Safely extract labels (handle both dict and string formats)
-        labels = []
-        issue_labels = issue_data.get("labels", [])
-        if isinstance(issue_labels, list):
-            for label in issue_labels:
-                if isinstance(label, dict):
-                    label_name = label.get("name")
-                    if label_name:
-                        labels.append(label_name)
-                elif isinstance(label, str):
-                    labels.append(label)
-        
         payload = {
             "title": issue_data["title"],
-            "body": body,
-            "labels": labels,
+            "body": self.format_migrated_issue_body(issue_data),
+            "labels": [label["name"] for label in issue_data.get("labels", [])],
         }
         
-        response = requests.post(url, headers=self.target_headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload)
         
         if response.status_code == 201:
-            new_issue = response.json()
-            
-            # Add assignees if present (handle both dict and string formats)
-            if "assignees" in issue_data and issue_data["assignees"]:
-                assignee_logins = []
-                for assignee in issue_data["assignees"]:
-                    if isinstance(assignee, dict):
-                        login = assignee.get("login")
-                        if login:
-                            assignee_logins.append(login)
-                    elif isinstance(assignee, str):
-                        assignee_logins.append(assignee)
-                
-                if assignee_logins:
-                    self.add_issue_assignees(repo_name, new_issue["number"], assignee_logins)
-            
-            # Close issue if state is closed (for PRs converted to issues)
-            if issue_data.get("state") == "closed":
-                self.close_issue(repo_name, new_issue["number"])
-            
-            # Add milestone if present (milestones need to be migrated first)
-            if "milestone" in issue_data and issue_data["milestone"]:
-                # Note: Milestone migration handled separately
-                pass
-            
-            return new_issue
+            return response.json()
         return None
     
     def format_migrated_issue_body(self, issue_data: Dict) -> str:
@@ -990,7 +386,7 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}"
         
         payload = {"state": "closed"}
-        response = requests.patch(url, headers=self.target_headers, json=payload)
+        response = requests.patch(url, headers=self.headers, json=payload)
         
         return response.status_code == 200
     
@@ -1038,7 +434,7 @@ class GitHubMigrator:
     def get_repo_variables(self, org: str, repo_name: str) -> List[Dict]:
         """Get repository variables"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/actions/variables"
-        response = requests.get(url, headers=self.source_headers)
+        response = requests.get(url, headers=self.headers)
         
         if response.status_code == 200:
             return response.json().get("variables", [])
@@ -1049,114 +445,17 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/actions/variables"
         payload = {"name": var_name, "value": var_value}
         
-        response = requests.post(url, headers=self.target_headers, json=payload)
+        response = requests.post(url, headers=self.headers, json=payload)
         return response.status_code == 201
     
     def get_repo_secrets(self, org: str, repo_name: str) -> List[str]:
         """Get repository secret names"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/actions/secrets"
-        response = requests.get(url, headers=self.source_headers)
+        response = requests.get(url, headers=self.headers)
         
         if response.status_code == 200:
             return [secret["name"] for secret in response.json().get("secrets", [])]
         return []
-    
-    def get_repo_webhooks(self, org: str, repo_name: str) -> List[Dict]:
-        """Get repository webhooks"""
-        url = f"{self.base_url}/repos/{org}/{repo_name}/hooks"
-        return self.paginated_request(url, self.source_headers)
-    
-    def create_repo_webhook(self, repo_name: str, webhook_data: Dict) -> bool:
-        """Create a webhook in target repository"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/hooks"
-        
-        # Build webhook payload (exclude sensitive fields like secret)
-        payload = {
-            "name": "web",
-            "active": webhook_data.get("active", True),
-            "events": webhook_data.get("events", ["push"]),
-            "config": {
-                "url": webhook_data["config"]["url"],
-                "content_type": webhook_data["config"].get("content_type", "json"),
-                "insecure_ssl": webhook_data["config"].get("insecure_ssl", "0"),
-            }
-        }
-        
-        # Note: webhook secret cannot be retrieved from source, must be set manually
-        if "secret" in webhook_data["config"]:
-            print(f"    ⚠ Webhook secret cannot be migrated automatically - requires manual setup")
-        
-        response = requests.post(url, headers=self.target_headers, json=payload)
-        
-        if response.status_code == 201:
-            print(f"    ✓ Webhook created: {webhook_data['config']['url']}")
-            return True
-        else:
-            error_msg = response.json().get('message', 'Unknown error')
-            print(f"    ⚠ Failed to create webhook: {error_msg}")
-            return False
-    
-    def migrate_webhooks(self, repo_name: str):
-        """Migrate repository webhooks"""
-        print(f"\n🔗 Migrating webhooks...")
-        
-        webhooks = self.get_repo_webhooks(self.source_org, repo_name)
-        
-        if not webhooks:
-            print("  No webhooks to migrate")
-            return
-        
-        print(f"  Found {len(webhooks)} webhooks")
-        
-        for webhook in webhooks:
-            if self.create_repo_webhook(repo_name, webhook):
-                time.sleep(0.5)  # Rate limiting
-    
-    def get_all_labels(self, org: str, repo_name: str) -> List[Dict]:
-        """Get all labels from repository"""
-        url = f"{self.base_url}/repos/{org}/{repo_name}/labels"
-        return self.paginated_request(url, self.source_headers)
-    
-    def create_label(self, repo_name: str, label_data: Dict) -> bool:
-        """Create a label in target repository"""
-        url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/labels"
-        
-        payload = {
-            "name": label_data["name"],
-            "color": label_data["color"].lstrip("#"),  # Remove # if present
-            "description": label_data.get("description", "")
-        }
-        
-        response = requests.post(url, headers=self.target_headers, json=payload)
-        
-        # 422 means label already exists, which is fine
-        return response.status_code in [201, 422]
-    
-    def migrate_labels(self, repo_name: str):
-        """Migrate repository labels"""
-        print(f"\n🏷️  Migrating labels...")
-        
-        labels = self.get_all_labels(self.source_org, repo_name)
-        
-        if not labels:
-            print("  No labels to migrate")
-        else:
-            print(f"  Found {len(labels)} labels")
-            migrated = 0
-            for label in labels:
-                if self.create_label(repo_name, label):
-                    migrated += 1
-            print(f"  ✓ Migrated {migrated} labels")
-        
-        # Create migration-specific labels if they don't exist
-        migration_labels = [
-            {"name": "migrated-pr", "color": "0E8A16", "description": "PR migrated from source repository"},
-            {"name": "branches-deleted", "color": "D93F0B", "description": "PR migrated as issue because source branches were deleted"}
-        ]
-        
-        print(f"  Creating migration labels...")
-        for label in migration_labels:
-            self.create_label(repo_name, label)
     
     def migrate_repository(self, repo_name: str):
         """Complete migration of a repository"""
@@ -1166,7 +465,7 @@ class GitHubMigrator:
         
         # 1. Get source repo settings
         print("\n1️⃣  Fetching source repository settings...")
-        source_settings = self.get_repo_settings(self.source_org, repo_name, use_source=True)
+        source_settings = self.get_repo_settings(self.source_org, repo_name)
         
         # 2. Create target repository
         print("\n2️⃣  Creating target repository...")
@@ -1182,49 +481,26 @@ class GitHubMigrator:
         print("\n4️⃣  Updating repository settings...")
         self.update_repo_settings(repo_name, source_settings)
         
-        # 4.5. Update default branch
-        default_branch = source_settings.get("default_branch", "main")
-        print(f"\n4️⃣.5️⃣  Setting default branch to {default_branch}...")
-        self.update_default_branch(repo_name, default_branch)
-        
-        # 4.6. Migrate labels (needed before PRs/issues)
-        self.migrate_labels(repo_name)
-        
-        # 5. Migrate branch protection rules
-        self.migrate_branch_protection(repo_name, default_branch)
-        
-        # 6. Migrate Pull Requests
+        # 5. Migrate Pull Requests
         self.migrate_pull_requests(repo_name)
         
-        # 7. Migrate Issues
+        # 6. Migrate Issues
         self.migrate_issues(repo_name)
         
-        # 8. Migrate webhooks
-        self.migrate_webhooks(repo_name)
-        
-        # 9. Migrate variables
-        print("\n9️⃣  Migrating repository variables...")
+        # 7. Migrate variables
+        print("\n7️⃣  Migrating repository variables...")
         variables = self.get_repo_variables(self.source_org, repo_name)
         for var in variables:
             if self.create_repo_variable(repo_name, var["name"], var["value"]):
                 print(f"  ✓ Variable {var['name']} created")
         
-        # 10. List secrets
-        print("\n🔟 Handling repository secrets...")
+        # 8. List secrets
+        print("\n8️⃣  Listing repository secrets...")
         secrets = self.get_repo_secrets(self.source_org, repo_name)
         if secrets:
-            print(f"  Found {len(secrets)} secrets in source repository")
-            print(f"  ⚠ Secrets CANNOT be automatically migrated (GitHub API security restriction)")
-            print(f"  GitHub does not allow reading secret values for security reasons")
-            print(f"  Secret names found:")
+            print(f"  ⚠ Found {len(secrets)} secrets (require manual migration):")
             for secret in secrets:
                 print(f"    - {secret}")
-            print(f"\n  📋 To migrate secrets manually:")
-            print(f"    1. Source: https://github.com/{self.source_org}/{repo_name}/settings/secrets/actions")
-            print(f"    2. Target: https://github.com/{self.target_org}/{repo_name}/settings/secrets/actions")
-            print(f"    3. For each secret above, copy the value from source and create it in target")
-        else:
-            print("  No secrets found in source repository")
         
         print(f"\n{'='*70}")
         print(f"✅ MIGRATION COMPLETED: {repo_name}")
@@ -1233,125 +509,34 @@ class GitHubMigrator:
     def get_repo_list(self) -> List[str]:
         """Get all repositories from source org"""
         url = f"{self.base_url}/orgs/{self.source_org}/repos"
-        repos_data = self.paginated_request(url, self.source_headers)
+        repos_data = self.paginated_request(url)
         return [repo["name"] for repo in repos_data]
 
 def main():
-    parser = argparse.ArgumentParser(
-        description='Migrate GitHub repositories between organizations with full history',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog='''
-Examples:
-  # Using environment variables (recommended):
-  export SOURCE_GITHUB_TOKEN="ghp_source_token"
-  export TARGET_GITHUB_TOKEN="ghp_target_token"
-  python migrate_github.py --source-org my-source --target-org my-target --repo my-repo
-
-  # Using command-line arguments:
-  python migrate_github.py \\
-    --source-token "ghp_source_token" \\
-    --target-token "ghp_target_token" \\
-    --source-org my-source \\
-    --target-org my-target \\
-    --repo my-repo
-
-  # Interactive mode:
-  python migrate_github.py
-        '''
-    )
+    # Configuration
+    GITHUB_TOKEN = "your_github_personal_access_token_here"
+    SOURCE_ORG = "source-org-name"
+    TARGET_ORG = "target-org-name"
     
-    parser.add_argument('--source-token', 
-                       help='GitHub token for source organization (or use SOURCE_GITHUB_TOKEN env var)')
-    parser.add_argument('--target-token', 
-                       help='GitHub token for target organization (or use TARGET_GITHUB_TOKEN env var)')
-    parser.add_argument('--source-org', 
-                       help='Source organization name (or use SOURCE_ORG env var)')
-    parser.add_argument('--target-org', 
-                       help='Target organization name (or use TARGET_ORG env var)')
-    parser.add_argument('--repo', 
-                       help='Repository name to migrate')
-    parser.add_argument('--list-repos', action='store_true',
-                       help='List all repositories in source organization')
-    
-    args = parser.parse_args()
-    
-    # Get tokens from arguments or environment variables
-    source_token = args.source_token or os.getenv("SOURCE_GITHUB_TOKEN")
-    target_token = args.target_token or os.getenv("TARGET_GITHUB_TOKEN")
-    source_org = args.source_org or os.getenv("SOURCE_ORG")
-    target_org = args.target_org or os.getenv("TARGET_ORG")
-    
-    # Interactive mode if missing parameters
-    if not all([source_token, target_token, source_org, target_org]):
-        print("GitHub Complete Repository Migration Tool")
-        print("=" * 70)
-        print("Migrates: commits, branches, tags, PRs, issues, comments, settings")
-        print("=" * 70)
-        print()
-        
-        if not source_token:
-            source_token = input("Enter SOURCE GitHub token: ").strip()
-        if not target_token:
-            target_token = input("Enter TARGET GitHub token: ").strip()
-        if not source_org:
-            source_org = input("Enter SOURCE organization name: ").strip()
-        if not target_org:
-            target_org = input("Enter TARGET organization name: ").strip()
-    
-    # Validate all required parameters
-    if not all([source_token, target_token, source_org, target_org]):
-        print("\n❌ Error: Missing required parameters")
-        print("\nRequired:")
-        print("  - Source GitHub token (--source-token or SOURCE_GITHUB_TOKEN env var)")
-        print("  - Target GitHub token (--target-token or TARGET_GITHUB_TOKEN env var)")
-        print("  - Source organization (--source-org or SOURCE_ORG env var)")
-        print("  - Target organization (--target-org or TARGET_ORG env var)")
-        print("\nRun with --help for more information")
+    if GITHUB_TOKEN == "your_github_personal_access_token_here":
+        print("❌ Please set your GitHub token in the script")
         sys.exit(1)
     
-    # Create migrator instance
-    migrator = GitHubMigrator(source_token, target_token, source_org, target_org)
+    migrator = GitHubMigrator(GITHUB_TOKEN, SOURCE_ORG, TARGET_ORG)
     
-    # List repos mode
-    if args.list_repos:
-        print(f"\n📚 Repositories in {source_org}:")
-        print("=" * 70)
-        try:
-            repos = migrator.get_repo_list()
-            for i, repo in enumerate(repos, 1):
-                print(f"{i}. {repo}")
-            print(f"\nTotal: {len(repos)} repositories")
-        except Exception as e:
-            print(f"❌ Error listing repositories: {str(e)}")
-        sys.exit(0)
+    print("GitHub Complete Repository Migration Tool")
+    print("=" * 70)
+    print("Migrates: commits, branches, tags, PRs, issues, comments, settings")
+    print("=" * 70)
     
-    # Get repository name
-    repo_name = args.repo
-    if not repo_name:
-        repo_name = input("\nEnter repository name to migrate: ").strip()
+    repo_name = input("\nEnter repository name to migrate: ")
     
-    if not repo_name:
-        print("❌ Repository name is required")
-        sys.exit(1)
+    confirm = input(f"\nMigrate '{repo_name}' from {SOURCE_ORG} to {TARGET_ORG}? (yes/no): ")
     
-    # Confirm migration
-    print(f"\n{'='*70}")
-    print(f"Migration Plan:")
-    print(f"  FROM: {source_org}/{repo_name}")
-    print(f"  TO:   {target_org}/{repo_name}")
-    print(f"{'='*70}")
-    
-    confirm = input("\nProceed with migration? (yes/no): ").strip().lower()
-    
-    if confirm == "yes":
-        try:
-            migrator.migrate_repository(repo_name)
-        except Exception as e:
-            print(f"\n❌ Migration failed: {str(e)}")
-            sys.exit(1)
+    if confirm.lower() == "yes":
+        migrator.migrate_repository(repo_name)
     else:
         print("Migration cancelled")
-        sys.exit(0)
 
 if __name__ == "__main__":
     main()
