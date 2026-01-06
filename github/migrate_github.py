@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Complete GitHub Repository Migration Script
+Complete GitHub Repository Migration Script with Separate Source/Target Tokens
 Migrates repositories with FULL history including:
 - Commits, branches, tags (via git mirror)
 - Pull Requests with comments, reviews, and status
@@ -16,21 +16,33 @@ import time
 from typing import Dict, List, Optional
 import sys
 from datetime import datetime
+import argparse
 
 class GitHubMigrator:
-    def __init__(self, token: str, source_org: str, target_org: str):
-        self.token = token
+    def __init__(self, source_token: str, target_token: str, source_org: str, target_org: str):
+        self.source_token = source_token
+        self.target_token = target_token
         self.source_org = source_org
         self.target_org = target_org
-        self.headers = {
-            "Authorization": f"Bearer {token}",
+        
+        # Headers for source org
+        self.source_headers = {
+            "Authorization": f"Bearer {source_token}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28"
         }
+        
+        # Headers for target org
+        self.target_headers = {
+            "Authorization": f"Bearer {target_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        
         self.base_url = "https://api.github.com"
     
-    def paginated_request(self, url: str, params: Dict = None) -> List:
-        """Make paginated API requests"""
+    def paginated_request(self, url: str, headers: Dict, params: Dict = None) -> List:
+        """Make paginated API requests with specified headers"""
         results = []
         page = 1
         params = params or {}
@@ -39,7 +51,7 @@ class GitHubMigrator:
             params["per_page"] = 100
             params["page"] = page
             
-            response = requests.get(url, headers=self.headers, params=params)
+            response = requests.get(url, headers=headers, params=params)
             
             if response.status_code != 200:
                 break
@@ -67,8 +79,8 @@ class GitHubMigrator:
         """Clone repository with full history and push to target"""
         print(f"\n📦 Cloning repository with full history...")
         
-        source_url = f"https://{self.token}@github.com/{self.source_org}/{repo_name}.git"
-        target_url = f"https://{self.token}@github.com/{self.target_org}/{repo_name}.git"
+        source_url = f"https://{self.source_token}@github.com/{self.source_org}/{repo_name}.git"
+        target_url = f"https://{self.target_token}@github.com/{self.target_org}/{repo_name}.git"
         
         repo_path = os.path.join(temp_dir, repo_name)
         
@@ -78,6 +90,19 @@ class GitHubMigrator:
             print("  Cloning with --mirror flag...")
             subprocess.run(
                 ["git", "clone", "--mirror", source_url, repo_path],
+                check=True,
+                capture_output=True
+            )
+            
+            # Configure git for large repositories
+            print("  Configuring git for large push...")
+            subprocess.run(
+                ["git", "-C", repo_path, "config", "http.postBuffer", "524288000"],
+                check=True,
+                capture_output=True
+            )
+            subprocess.run(
+                ["git", "-C", repo_path, "config", "http.version", "HTTP/1.1"],
                 check=True,
                 capture_output=True
             )
@@ -93,11 +118,56 @@ class GitHubMigrator:
             return True
             
         except subprocess.CalledProcessError as e:
-            print(f"✗ Git operation failed: {e.stderr.decode() if e.stderr else str(e)}")
+            error_msg = e.stderr.decode() if e.stderr else str(e)
+            print(f"✗ Git operation failed: {error_msg}")
+            
+            # Try alternative push method if mirror fails
+            if "postBuffer" in error_msg or "RPC failed" in error_msg:
+                print("  ⚠ Large repository detected, trying chunked push...")
+                return self.push_mirror_chunked(repo_path, target_url)
+            
             return False
         finally:
             if os.path.exists(repo_path):
                 subprocess.run(["rm", "-rf", repo_path], check=False)
+    
+    def push_mirror_chunked(self, repo_path: str, target_url: str) -> bool:
+        """Push repository in chunks (for large repos)"""
+        try:
+            print("  Pushing branches individually...")
+            
+            # Get all branches
+            result = subprocess.run(
+                ["git", "-C", repo_path, "for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            branches = result.stdout.strip().split('\n') if result.stdout.strip() else []
+            
+            # Push each branch
+            for branch in branches:
+                print(f"    Pushing branch: {branch}")
+                subprocess.run(
+                    ["git", "-C", repo_path, "push", target_url, f"refs/heads/{branch}"],
+                    check=True,
+                    capture_output=True
+                )
+            
+            # Push all tags
+            print("  Pushing tags...")
+            subprocess.run(
+                ["git", "-C", repo_path, "push", "--tags", target_url],
+                check=True,
+                capture_output=True
+            )
+            
+            print("✓ Repository pushed successfully (chunked)")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            print(f"✗ Chunked push failed: {e.stderr.decode() if e.stderr else str(e)}")
+            return False
     
     def create_target_repo(self, repo_name: str, settings: Dict) -> bool:
         """Create repository in target org"""
@@ -112,7 +182,7 @@ class GitHubMigrator:
             "has_wiki": settings.get("has_wiki", True),
         }
         
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.target_headers, json=payload)
         
         if response.status_code == 201:
             print(f"✓ Repository created in target org")
@@ -124,10 +194,11 @@ class GitHubMigrator:
             print(f"✗ Failed to create repository: {response.json()}")
             return False
     
-    def get_repo_settings(self, org: str, repo_name: str) -> Dict:
+    def get_repo_settings(self, org: str, repo_name: str, use_source: bool = True) -> Dict:
         """Get repository settings"""
         url = f"{self.base_url}/repos/{org}/{repo_name}"
-        response = requests.get(url, headers=self.headers)
+        headers = self.source_headers if use_source else self.target_headers
+        response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
             return response.json()
@@ -151,7 +222,7 @@ class GitHubMigrator:
             "delete_branch_on_merge": settings.get("delete_branch_on_merge"),
         }
         
-        response = requests.patch(url, headers=self.headers, json=update_settings)
+        response = requests.patch(url, headers=self.target_headers, json=update_settings)
         return response.status_code == 200
     
     def get_all_pull_requests(self, org: str, repo_name: str) -> List[Dict]:
@@ -159,24 +230,24 @@ class GitHubMigrator:
         print(f"\n🔍 Fetching all pull requests...")
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls"
         
-        prs = self.paginated_request(url, {"state": "all"})
+        prs = self.paginated_request(url, self.source_headers, {"state": "all"})
         print(f"  Found {len(prs)} pull requests")
         return prs
     
     def get_pr_comments(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all comments for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/issues/{pr_number}/comments"
-        return self.paginated_request(url)
+        return self.paginated_request(url, self.source_headers)
     
     def get_pr_review_comments(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all review comments (line comments) for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls/{pr_number}/comments"
-        return self.paginated_request(url)
+        return self.paginated_request(url, self.source_headers)
     
     def get_pr_reviews(self, org: str, repo_name: str, pr_number: int) -> List[Dict]:
         """Get all reviews for a pull request"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/pulls/{pr_number}/reviews"
-        return self.paginated_request(url)
+        return self.paginated_request(url, self.source_headers)
     
     def create_pull_request(self, repo_name: str, pr_data: Dict) -> Optional[Dict]:
         """Create a pull request in target repository"""
@@ -190,7 +261,7 @@ class GitHubMigrator:
             "base": pr_data["base"]["ref"],
         }
         
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.target_headers, json=payload)
         
         if response.status_code == 201:
             return response.json()
@@ -218,7 +289,7 @@ class GitHubMigrator:
         body = f"**@{comment['user']['login']}** commented on {comment['created_at']}:\n\n{comment.get('body', '')}"
         
         payload = {"body": body}
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.target_headers, json=payload)
         
         return response.status_code == 201
     
@@ -227,7 +298,7 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/pulls/{pr_number}"
         
         payload = {"state": "closed"}
-        response = requests.patch(url, headers=self.headers, json=payload)
+        response = requests.patch(url, headers=self.target_headers, json=payload)
         
         return response.status_code == 200
     
@@ -346,7 +417,7 @@ class GitHubMigrator:
         """Get all issues (excluding PRs)"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/issues"
         
-        all_issues = self.paginated_request(url, {"state": "all"})
+        all_issues = self.paginated_request(url, self.source_headers, {"state": "all"})
         
         # Filter out pull requests
         issues = [issue for issue in all_issues if "pull_request" not in issue]
@@ -362,7 +433,7 @@ class GitHubMigrator:
             "labels": [label["name"] for label in issue_data.get("labels", [])],
         }
         
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.target_headers, json=payload)
         
         if response.status_code == 201:
             return response.json()
@@ -386,7 +457,7 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}"
         
         payload = {"state": "closed"}
-        response = requests.patch(url, headers=self.headers, json=payload)
+        response = requests.patch(url, headers=self.target_headers, json=payload)
         
         return response.status_code == 200
     
@@ -434,7 +505,7 @@ class GitHubMigrator:
     def get_repo_variables(self, org: str, repo_name: str) -> List[Dict]:
         """Get repository variables"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/actions/variables"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.source_headers)
         
         if response.status_code == 200:
             return response.json().get("variables", [])
@@ -445,13 +516,13 @@ class GitHubMigrator:
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/actions/variables"
         payload = {"name": var_name, "value": var_value}
         
-        response = requests.post(url, headers=self.headers, json=payload)
+        response = requests.post(url, headers=self.target_headers, json=payload)
         return response.status_code == 201
     
     def get_repo_secrets(self, org: str, repo_name: str) -> List[str]:
         """Get repository secret names"""
         url = f"{self.base_url}/repos/{org}/{repo_name}/actions/secrets"
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(url, headers=self.source_headers)
         
         if response.status_code == 200:
             return [secret["name"] for secret in response.json().get("secrets", [])]
@@ -465,7 +536,7 @@ class GitHubMigrator:
         
         # 1. Get source repo settings
         print("\n1️⃣  Fetching source repository settings...")
-        source_settings = self.get_repo_settings(self.source_org, repo_name)
+        source_settings = self.get_repo_settings(self.source_org, repo_name, use_source=True)
         
         # 2. Create target repository
         print("\n2️⃣  Creating target repository...")
@@ -509,34 +580,125 @@ class GitHubMigrator:
     def get_repo_list(self) -> List[str]:
         """Get all repositories from source org"""
         url = f"{self.base_url}/orgs/{self.source_org}/repos"
-        repos_data = self.paginated_request(url)
+        repos_data = self.paginated_request(url, self.source_headers)
         return [repo["name"] for repo in repos_data]
 
 def main():
-    # Configuration
-    GITHUB_TOKEN = "your_github_personal_access_token_here"
-    SOURCE_ORG = "source-org-name"
-    TARGET_ORG = "target-org-name"
+    parser = argparse.ArgumentParser(
+        description='Migrate GitHub repositories between organizations with full history',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # Using environment variables (recommended):
+  export SOURCE_GITHUB_TOKEN="ghp_source_token"
+  export TARGET_GITHUB_TOKEN="ghp_target_token"
+  python migrate_github.py --source-org my-source --target-org my-target --repo my-repo
+
+  # Using command-line arguments:
+  python migrate_github.py \\
+    --source-token "ghp_source_token" \\
+    --target-token "ghp_target_token" \\
+    --source-org my-source \\
+    --target-org my-target \\
+    --repo my-repo
+
+  # Interactive mode:
+  python migrate_github.py
+        '''
+    )
     
-    if GITHUB_TOKEN == "your_github_personal_access_token_here":
-        print("❌ Please set your GitHub token in the script")
+    parser.add_argument('--source-token', 
+                       help='GitHub token for source organization (or use SOURCE_GITHUB_TOKEN env var)')
+    parser.add_argument('--target-token', 
+                       help='GitHub token for target organization (or use TARGET_GITHUB_TOKEN env var)')
+    parser.add_argument('--source-org', 
+                       help='Source organization name (or use SOURCE_ORG env var)')
+    parser.add_argument('--target-org', 
+                       help='Target organization name (or use TARGET_ORG env var)')
+    parser.add_argument('--repo', 
+                       help='Repository name to migrate')
+    parser.add_argument('--list-repos', action='store_true',
+                       help='List all repositories in source organization')
+    
+    args = parser.parse_args()
+    
+    # Get tokens from arguments or environment variables
+    source_token = args.source_token or os.getenv("SOURCE_GITHUB_TOKEN")
+    target_token = args.target_token or os.getenv("TARGET_GITHUB_TOKEN")
+    source_org = args.source_org or os.getenv("SOURCE_ORG")
+    target_org = args.target_org or os.getenv("TARGET_ORG")
+    
+    # Interactive mode if missing parameters
+    if not all([source_token, target_token, source_org, target_org]):
+        print("GitHub Complete Repository Migration Tool")
+        print("=" * 70)
+        print("Migrates: commits, branches, tags, PRs, issues, comments, settings")
+        print("=" * 70)
+        print()
+        
+        if not source_token:
+            source_token = input("Enter SOURCE GitHub token: ").strip()
+        if not target_token:
+            target_token = input("Enter TARGET GitHub token: ").strip()
+        if not source_org:
+            source_org = input("Enter SOURCE organization name: ").strip()
+        if not target_org:
+            target_org = input("Enter TARGET organization name: ").strip()
+    
+    # Validate all required parameters
+    if not all([source_token, target_token, source_org, target_org]):
+        print("\n❌ Error: Missing required parameters")
+        print("\nRequired:")
+        print("  - Source GitHub token (--source-token or SOURCE_GITHUB_TOKEN env var)")
+        print("  - Target GitHub token (--target-token or TARGET_GITHUB_TOKEN env var)")
+        print("  - Source organization (--source-org or SOURCE_ORG env var)")
+        print("  - Target organization (--target-org or TARGET_ORG env var)")
+        print("\nRun with --help for more information")
         sys.exit(1)
     
-    migrator = GitHubMigrator(GITHUB_TOKEN, SOURCE_ORG, TARGET_ORG)
+    # Create migrator instance
+    migrator = GitHubMigrator(source_token, target_token, source_org, target_org)
     
-    print("GitHub Complete Repository Migration Tool")
-    print("=" * 70)
-    print("Migrates: commits, branches, tags, PRs, issues, comments, settings")
-    print("=" * 70)
+    # List repos mode
+    if args.list_repos:
+        print(f"\n📚 Repositories in {source_org}:")
+        print("=" * 70)
+        try:
+            repos = migrator.get_repo_list()
+            for i, repo in enumerate(repos, 1):
+                print(f"{i}. {repo}")
+            print(f"\nTotal: {len(repos)} repositories")
+        except Exception as e:
+            print(f"❌ Error listing repositories: {str(e)}")
+        sys.exit(0)
     
-    repo_name = input("\nEnter repository name to migrate: ")
+    # Get repository name
+    repo_name = args.repo
+    if not repo_name:
+        repo_name = input("\nEnter repository name to migrate: ").strip()
     
-    confirm = input(f"\nMigrate '{repo_name}' from {SOURCE_ORG} to {TARGET_ORG}? (yes/no): ")
+    if not repo_name:
+        print("❌ Repository name is required")
+        sys.exit(1)
     
-    if confirm.lower() == "yes":
-        migrator.migrate_repository(repo_name)
+    # Confirm migration
+    print(f"\n{'='*70}")
+    print(f"Migration Plan:")
+    print(f"  FROM: {source_org}/{repo_name}")
+    print(f"  TO:   {target_org}/{repo_name}")
+    print(f"{'='*70}")
+    
+    confirm = input("\nProceed with migration? (yes/no): ").strip().lower()
+    
+    if confirm == "yes":
+        try:
+            migrator.migrate_repository(repo_name)
+        except Exception as e:
+            print(f"\n❌ Migration failed: {str(e)}")
+            sys.exit(1)
     else:
         print("Migration cancelled")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
