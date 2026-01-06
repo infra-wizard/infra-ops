@@ -502,6 +502,31 @@ class GitHubMigrator:
 """
         return metadata + (body or "")
     
+    def format_migrated_pr_as_issue_body(self, pr_data: Dict) -> str:
+        """Format PR body as issue when branches don't exist"""
+        head_branch = pr_data.get("head", {}).get("ref", "unknown")
+        base_branch = pr_data.get("base", {}).get("ref", "unknown")
+        merged_at = pr_data.get("merged_at")
+        closed_at = pr_data.get("closed_at")
+        
+        metadata = f"""
+---
+**⚠️ MIGRATED PR (Branches Deleted)**
+**🔄 Migrated from:** {self.source_org}/{pr_data.get('head', {}).get('repo', {}).get('name', 'unknown')}
+**📅 Original PR:** #{pr_data['number']} by @{pr_data['user']['login']}
+**📝 Created:** {pr_data['created_at']}
+**✅ Status:** {pr_data['state']} {'(merged)' if merged_at else ''}
+**🔀 Head Branch:** `{head_branch}` (deleted)
+**🔀 Base Branch:** `{base_branch}`
+{f"**✅ Merged:** {merged_at}" if merged_at else ""}
+{f"**❌ Closed:** {closed_at}" if closed_at and not merged_at else ""}
+---
+
+**Note:** This PR was migrated as a closed issue because the source branches no longer exist in the target repository. All comments and reviews from the original PR are preserved below.
+
+"""
+        return metadata + (pr_data.get("body", "") or "")
+    
     def create_issue_comment(self, repo_name: str, issue_number: int, comment: Dict) -> bool:
         """Create a comment on an issue/PR"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues/{issue_number}/comments"
@@ -533,6 +558,8 @@ class GitHubMigrator:
             return
         
         migrated_count = 0
+        pr_count = 0
+        issue_count = 0
         failed_count = 0
         failed_prs = []
         
@@ -546,19 +573,70 @@ class GitHubMigrator:
                 new_pr = self.create_pull_request(repo_name, pr)
                 
                 if not new_pr:
-                    failed_count += 1
-                    head_branch = pr.get("head", {}).get("ref", "unknown")
-                    base_branch = pr.get("base", {}).get("ref", "unknown")
-                    failed_prs.append({
-                        "number": pr_number,
-                        "title": pr.get("title", "")[:50],
-                        "head": head_branch,
-                        "base": base_branch
-                    })
+                    # Branches don't exist - create as closed issue to preserve history
+                    print(f"    ℹ️  Creating as closed issue (branches deleted)...")
+                    issue_data = {
+                        "title": f"[PR #{pr_number}] {pr.get('title', '')}",
+                        "body": self.format_migrated_pr_as_issue_body(pr),
+                        "state": "closed",
+                        "labels": [label["name"] for label in pr.get("labels", [])] + ["migrated-pr", "branches-deleted"],
+                        "assignees": pr.get("assignees", [])
+                    }
+                    
+                    # Create issue instead of PR
+                    new_issue = self.create_issue(repo_name, issue_data)
+                    
+                    if new_issue:
+                        new_issue_number = new_issue["number"]
+                        print(f"    ✓ Created as closed Issue #{new_issue_number}")
+                        
+                        # Migrate all comments
+                        comments = self.get_pr_comments(self.source_org, repo_name, pr_number)
+                        if comments:
+                            print(f"    Migrating {len(comments)} comments...")
+                            for comment in comments:
+                                self.create_issue_comment(repo_name, new_issue_number, comment)
+                                time.sleep(0.5)
+                        
+                        # Migrate review comments
+                        review_comments = self.get_pr_review_comments(self.source_org, repo_name, pr_number)
+                        if review_comments:
+                            print(f"    Found {len(review_comments)} review comments")
+                            summary = self.create_review_summary(review_comments)
+                            self.create_issue_comment(repo_name, new_issue_number, {
+                                "user": {"login": "migration-bot"},
+                                "created_at": datetime.now().isoformat(),
+                                "body": summary
+                            })
+                        
+                        # Migrate reviews
+                        reviews = self.get_pr_reviews(self.source_org, repo_name, pr_number)
+                        if reviews:
+                            print(f"    Found {len(reviews)} reviews")
+                            review_summary = self.create_reviews_summary(reviews)
+                            self.create_issue_comment(repo_name, new_issue_number, {
+                                "user": {"login": "migration-bot"},
+                                "created_at": datetime.now().isoformat(),
+                                "body": review_summary
+                            })
+                        
+                        migrated_count += 1
+                        issue_count += 1
+                    else:
+                        failed_count += 1
+                        head_branch = pr.get("head", {}).get("ref", "unknown")
+                        base_branch = pr.get("base", {}).get("ref", "unknown")
+                        failed_prs.append({
+                            "number": pr_number,
+                            "title": pr.get("title", "")[:50],
+                            "head": head_branch,
+                            "base": base_branch
+                        })
                     continue
                 
                 new_pr_number = new_pr["number"]
                 print(f"    ✓ Created as PR #{new_pr_number}")
+                pr_count += 1
                 
                 # Migrate general comments
                 comments = self.get_pr_comments(self.source_org, repo_name, pr_number)
@@ -606,6 +684,7 @@ class GitHubMigrator:
                         print(f"    ✓ Closed PR #{new_pr_number}")
                 
                 migrated_count += 1
+                pr_count += 1
                 time.sleep(1)  # Rate limiting
                 
             except Exception as e:
@@ -613,11 +692,13 @@ class GitHubMigrator:
                 failed_count += 1
         
         print(f"\n✅ Pull Request Migration Complete:")
-        print(f"  Migrated: {migrated_count}")
+        print(f"  Migrated as PRs: {pr_count}")
+        print(f"  Migrated as Issues (branches deleted): {issue_count}")
+        print(f"  Total migrated: {migrated_count}")
         print(f"  Failed: {failed_count}")
         
         if failed_prs:
-            print(f"\n  ⚠ Failed PRs (branches may not exist or were deleted):")
+            print(f"\n  ⚠ Failed PRs (could not be migrated):")
             for failed_pr in failed_prs[:10]:  # Show first 10
                 print(f"    - PR #{failed_pr['number']}: {failed_pr['title']} (head: {failed_pr['head']}, base: {failed_pr['base']})")
             if len(failed_prs) > 10:
@@ -672,9 +753,12 @@ class GitHubMigrator:
         """Create an issue in target repository"""
         url = f"{self.base_url}/repos/{self.target_org}/{repo_name}/issues"
         
+        # Use custom body if provided (for PRs converted to issues), otherwise format it
+        body = issue_data.get("body") or self.format_migrated_issue_body(issue_data)
+        
         payload = {
             "title": issue_data["title"],
-            "body": self.format_migrated_issue_body(issue_data),
+            "body": body,
             "labels": [label["name"] for label in issue_data.get("labels", [])],
         }
         
@@ -687,6 +771,10 @@ class GitHubMigrator:
             if "assignees" in issue_data and issue_data["assignees"]:
                 assignees = [assignee["login"] for assignee in issue_data["assignees"]]
                 self.add_issue_assignees(repo_name, new_issue["number"], assignees)
+            
+            # Close issue if state is closed (for PRs converted to issues)
+            if issue_data.get("state") == "closed":
+                self.close_issue(repo_name, new_issue["number"])
             
             # Add milestone if present (milestones need to be migrated first)
             if "milestone" in issue_data and issue_data["milestone"]:
@@ -864,16 +952,23 @@ class GitHubMigrator:
         
         if not labels:
             print("  No labels to migrate")
-            return
+        else:
+            print(f"  Found {len(labels)} labels")
+            migrated = 0
+            for label in labels:
+                if self.create_label(repo_name, label):
+                    migrated += 1
+            print(f"  ✓ Migrated {migrated} labels")
         
-        print(f"  Found {len(labels)} labels")
+        # Create migration-specific labels if they don't exist
+        migration_labels = [
+            {"name": "migrated-pr", "color": "0E8A16", "description": "PR migrated from source repository"},
+            {"name": "branches-deleted", "color": "D93F0B", "description": "PR migrated as issue because source branches were deleted"}
+        ]
         
-        migrated = 0
-        for label in labels:
-            if self.create_label(repo_name, label):
-                migrated += 1
-        
-        print(f"  ✓ Migrated {migrated} labels")
+        print(f"  Creating migration labels...")
+        for label in migration_labels:
+            self.create_label(repo_name, label)
     
     def migrate_repository(self, repo_name: str):
         """Complete migration of a repository"""
