@@ -1,0 +1,6 @@
+export SOURCE_GITHUB_TOKEN="ghp_source_token_here"
+export TARGET_GITHUB_TOKEN="ghp_target_token_here"
+export SOURCE_ORG="source-org-name"
+export TARGET_ORG="target-org-name"
+
+python migrate_github.py --repo my-repository
