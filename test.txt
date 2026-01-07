@@ -1,5 +1,2 @@
-helm install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version 2.4.1 \
-  --set controller.service.type=LoadBalancer \
-  --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-internal"="true" \
-  --create-namespace \
-  -n nginx-ingress
+annotations:
+  service.beta.kubernetes.io/azure-load-balancer-internal: "true"
