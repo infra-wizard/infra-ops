@@ -1,32 +1,5 @@
-helm repo add emberstack https://emberstack.github.io/helm-charts
-helm repo update
-helm install reflector emberstack/reflector --namespace infra --create-namespace
-
-# 1️⃣ Add the Emberstack Helm repo
-helm repo add emberstack https://emberstack.github.io/helm-charts
-
-# 2️⃣ Update repo to fetch latest chart index
-helm repo update
-
-# 3️⃣ Pull the Reflector chart locally (no install)
-helm pull emberstack/reflector --untar --untardir ./reflector-chart
-
-
-
----
-
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: common-settings
-  namespace: default
-  annotations:
-   reflector.v1.k8s.emberstack.com/reflection-allowed: "true"
-   reflector.v1.k8s.emberstack.com/reflection-allowed-namespaces: argocd
-   reflector.v1.k8s.emberstack.com/reflection-auto-enabled: "true"
-   reflector.v1.k8s.emberstack.com/reflection-auto-namespaces: argocd
-data:
-  LOG_LEVEL: info
-  FEATURE_FLAG: "true"
-~                                                                                                                                                                                                                     
-~                                 
+helm install nginx-ingress oci://ghcr.io/nginx/charts/nginx-ingress --version 2.4.1 \
+  --set controller.service.type=LoadBalancer \
+  --set controller.service.annotations."service\.beta\.kubernetes\.io/azure-load-balancer-internal"="true" \
+  --create-namespace \
+  -n nginx-ingress
