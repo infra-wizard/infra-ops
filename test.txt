@@ -1,2 +1,3 @@
-kubectl get secret <tls-secret> -n <ns> \
-  -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -text | grep -A1 "Subject Alternative"
+curl -vk \
+  --resolve tlabbottlinkuser.products.abbott:443:172.20.43.253 \
+  https://tlabbottlinkuser.products.abbott/Thingworx
