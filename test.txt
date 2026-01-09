@@ -1,2 +1,2 @@
-annotations:
-  service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+kubectl get secret <tls-secret> -n <ns> \
+  -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -text | grep -A1 "Subject Alternative"
