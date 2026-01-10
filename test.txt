@@ -1,3 +1,4 @@
-curl -vk \
-  --resolve tlabbottlinkuser.products.abbott:443:172.20.43.253 \
-  https://tlabbottlinkuser.products.abbott/Thingworx
+controller:
+  service:
+    annotations:
+      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
