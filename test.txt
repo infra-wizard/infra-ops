@@ -1,3 +1,3 @@
-nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
-nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"
-nginx.ingress.kubernetes.io/ssl-redirect: "true"
+openssl s_client \
+  -connect twx-twx-thingworx.twx.svc.cluster.local:8443 \
+  -servername t1abbottlinkuser.products.abbott
