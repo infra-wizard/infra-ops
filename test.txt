@@ -1,2 +1,7 @@
+nginx.org/redirect-to-https: "true"
+# Standard NGINX annotations (keep these too)
 nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 nginx.ingress.kubernetes.io/ssl-redirect: "true"
+nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+nginx.ingress.kubernetes.io/proxy-ssl-verify: "false"
+nginx.ingress.kubernetes.io/proxy-ssl-server-name: "on"
