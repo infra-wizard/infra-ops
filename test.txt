@@ -1,4 +1,2 @@
-controller:
-  service:
-    annotations:
-      service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+nginx.ingress.kubernetes.io/ssl-redirect: "true"
