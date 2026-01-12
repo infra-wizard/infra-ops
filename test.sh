@@ -3,7 +3,7 @@
 ID="RM_kgDaACQSNnEWYMM4Mi0zMZzJLTQ5YzgtYjVjYS02NzVmNmFlZmFlM2E"
 APP="gei-cli"
 
-# Detect terminal
+# Enable colors only if stdout is a terminal
 if [[ -t 1 ]]; then
   GREEN="\033[0;32m"
   YELLOW="\033[0;33m"
@@ -25,44 +25,30 @@ log() {
     "$(timestamp)" "$color" "$level" "$RESET" "$APP" "$msg"
 }
 
-log INFO  "$GREEN"  "Starting repository migration"
-log INFO  "$GREEN"  "Source: Trail-Tech/bluetooth-phonebook-rcip"
-log INFO  "$GREEN"  "Target: Polaris-InVehicleSoftware/bluetooth-phonebook-rcip"
+states=("PENDING_VALIDATION" "QUEUED" "IN_PROGRESS")
+errors=(
+  "Network timeout contacting GitHub"
+  "Rate limit exceeded"
+  "Protected branch policy violation"
+)
 
-sleep 2
-log INFO  "$GREEN"  "Migration created (ID=$ID)"
+log INFO "$GREEN" "Starting migration monitor (ID=$ID)"
 
-sleep 4
-log INFO  "$GREEN"  "State=PENDING_VALIDATION – validating permissions"
+while true; do
+  state="${states[$RANDOM % ${#states[@]}]}"
 
-sleep 3
-log WARN  "$YELLOW" "GitHub API latency detected"
+  log INFO "$GREEN" "Migration in progress (ID=$ID). State=$state. Waiting 10 seconds..."
 
-sleep 4
-log INFO  "$GREEN"  "State=QUEUED – awaiting worker"
+  # Random warning
+  if (( RANDOM % 5 == 0 )); then
+    log WARN "$YELLOW" "GitHub API latency detected"
+  fi
 
-sleep 4
-log INFO  "$GREEN"  "State=IN_PROGRESS – cloning repository"
+  # Random error
+  if (( RANDOM % 8 == 0 )); then
+    log ERROR "$RED" "${errors[$RANDOM % ${#errors[@]}]}"
+    log INFO  "$GREEN" "Retrying operation"
+  fi
 
-sleep 3
-log ERROR "$RED"    "Clone failed: network timeout"
-log INFO  "$GREEN"  "Retrying clone (attempt 2/3)"
-
-sleep 4
-log INFO  "$GREEN"  "Clone successful"
-
-sleep 3
-log INFO  "$GREEN"  "Pushing repository to target"
-
-sleep 3
-log ERROR "$RED"    "Push rejected: protected branch policy"
-log WARN  "$YELLOW" "Retrying with admin override"
-
-sleep 4
-log INFO  "$GREEN"  "Push successful"
-
-sleep 3
-log INFO  "$GREEN"  "Finalizing migration"
-
-sleep 2
-log INFO  "$GREEN"  "Migration completed successfully (ID=$ID)"
+  sleep 10
+done
