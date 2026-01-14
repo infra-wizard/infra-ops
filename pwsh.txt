@@ -1,0 +1,490 @@
+#!/usr/bin/env pwsh
+
+# =========== Created with CLI version 1.26.0 ===========
+
+function ExecAndGetMigrationID {
+    param (
+        [scriptblock]$ScriptBlock
+    )
+    $MigrationID = & @ScriptBlock | ForEach-Object {
+        Write-Host $_
+        $_
+    } | Select-String -Pattern "\(ID: (.+)\)" | ForEach-Object { $_.matches.groups[1] }
+    return $MigrationID
+}
+
+if (-not $env:GH_PAT) {
+    Write-Error "GH_PAT environment variable must be set to a valid GitHub Personal Access Token with the appropriate scopes. For more information see https://docs.github.com/en/migrations/using-github-enterprise-importer/preparing-to-migrate-with-github-enterprise-importer/managing-access-for-github-enterprise-importer#creating-a-personal-access-token-for-github-enterprise-importer"
+    exit 1
+} else {
+    Write-Host "GH_PAT environment variable is set and will be used to authenticate to GitHub."
+}
+
+$Succeeded = 0
+$Failed = 0
+$RepoMigrations = [ordered]@{}
+
+# =========== Organization: Trail-Tech ===========
+
+# === Queuing repo migrations ===
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "apple-mfid-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "apple-mfid-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["apple-mfid-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "audio-hal" --github-target-org "Polaris-InVehicleSoftware" --target-repo "audio-hal" --queue-only --target-repo-visibility private }
+$RepoMigrations["audio-hal"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "audiomanager-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "audiomanager-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["audiomanager-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "backlightd" --github-target-org "Polaris-InVehicleSoftware" --target-repo "backlightd" --queue-only --target-repo-visibility private }
+$RepoMigrations["backlightd"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "bluetooth-connection-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "bluetooth-connection-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["bluetooth-connection-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "bluetooth-message-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "bluetooth-message-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["bluetooth-message-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "bluetooth-phonebook-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "bluetooth-phonebook-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["bluetooth-phonebook-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "bluetooth-telephony-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "bluetooth-telephony-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["bluetooth-telephony-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "bluez5" --github-target-org "Polaris-InVehicleSoftware" --target-repo "bluez5" --queue-only --target-repo-visibility private }
+$RepoMigrations["bluez5"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "broadcom-bluetooth-firmware" --github-target-org "Polaris-InVehicleSoftware" --target-repo "broadcom-bluetooth-firmware" --queue-only --target-repo-visibility private }
+$RepoMigrations["broadcom-bluetooth-firmware"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "c2b-fw" --github-target-org "Polaris-InVehicleSoftware" --target-repo "c2b-fw" --queue-only --target-repo-visibility private }
+$RepoMigrations["c2b-fw"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "common-projection-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "common-projection-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["common-projection-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "cspi-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "cspi-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["cspi-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "cvcproxy" --github-target-org "Polaris-InVehicleSoftware" --target-repo "cvcproxy" --queue-only --target-repo-visibility private }
+$RepoMigrations["cvcproxy"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "engine-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "engine-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["engine-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "environment-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "environment-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["environment-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "epreload-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "epreload-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["epreload-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "gear-simulator" --github-target-org "Polaris-InVehicleSoftware" --target-repo "gear-simulator" --queue-only --target-repo-visibility private }
+$RepoMigrations["gear-simulator"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "geodataservice" --github-target-org "Polaris-InVehicleSoftware" --target-repo "geodataservice" --queue-only --target-repo-visibility private }
+$RepoMigrations["geodataservice"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "group-ride-library" --github-target-org "Polaris-InVehicleSoftware" --target-repo "group-ride-library" --queue-only --target-repo-visibility private }
+$RepoMigrations["group-ride-library"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "group-ride-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "group-ride-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["group-ride-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "group-ride-service" --github-target-org "Polaris-InVehicleSoftware" --target-repo "group-ride-service" --queue-only --target-repo-visibility private }
+$RepoMigrations["group-ride-service"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "hcm-tools" --github-target-org "Polaris-InVehicleSoftware" --target-repo "hcm-tools" --queue-only --target-repo-visibility private }
+$RepoMigrations["hcm-tools"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "janus" --github-target-org "Polaris-InVehicleSoftware" --target-repo "janus" --queue-only --target-repo-visibility private }
+$RepoMigrations["janus"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "lib-apple-commplugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "lib-apple-commplugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["lib-apple-commplugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libcvcproxy" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libcvcproxy" --queue-only --target-repo-visibility private }
+$RepoMigrations["libcvcproxy"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libdbuswrapper" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libdbuswrapper" --queue-only --target-repo-visibility private }
+$RepoMigrations["libdbuswrapper"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libdebuglogger" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libdebuglogger" --queue-only --target-repo-visibility private }
+$RepoMigrations["libdebuglogger"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libmap-data" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libmap-data" --queue-only --target-repo-visibility private }
+$RepoMigrations["libmap-data"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libmodemmanager" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libmodemmanager" --queue-only --target-repo-visibility private }
+$RepoMigrations["libmodemmanager"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libpolaris-cvc" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libpolaris-cvc" --queue-only --target-repo-visibility private }
+$RepoMigrations["libpolaris-cvc"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libpolaris-logger" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libpolaris-logger" --queue-only --target-repo-visibility private }
+$RepoMigrations["libpolaris-logger"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libpolaris-user" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libpolaris-user" --queue-only --target-repo-visibility private }
+$RepoMigrations["libpolaris-user"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libridecommandsync" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libridecommandsync" --queue-only --target-repo-visibility private }
+$RepoMigrations["libridecommandsync"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libvehicle" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libvehicle" --queue-only --target-repo-visibility private }
+$RepoMigrations["libvehicle"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "libvehicle-adaptor" --github-target-org "Polaris-InVehicleSoftware" --target-repo "libvehicle-adaptor" --queue-only --target-repo-visibility private }
+$RepoMigrations["libvehicle-adaptor"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "map-data-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "map-data-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["map-data-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "map-data-plugin-key" --github-target-org "Polaris-InVehicleSoftware" --target-repo "map-data-plugin-key" --queue-only --target-repo-visibility private }
+$RepoMigrations["map-data-plugin-key"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "media-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "media-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["media-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "modemmanager-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "modemmanager-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["modemmanager-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-carplay-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-carplay-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-carplay-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-common-infra-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-common-infra-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-common-infra-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-disks" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-disks" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-disks"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-gps" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-gps" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-gps"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-logger" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-logger" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-logger"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-logger-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-logger-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-logger-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-persistence" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-persistence" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-persistence"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-styles" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-styles" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-styles"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-thermald" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-thermald" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-thermald"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-tiles" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-tiles" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-tiles"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-tuner-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-tuner-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-tuner-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-user" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-user" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-user"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-user-config" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-user-config" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-user-config"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-user-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-user-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-user-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-vcard-parser" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-vcard-parser" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-vcard-parser"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "polaris-video" --github-target-org "Polaris-InVehicleSoftware" --target-repo "polaris-video" --queue-only --target-repo-visibility private }
+$RepoMigrations["polaris-video"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "pose-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "pose-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["pose-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "powermanagerd" --github-target-org "Polaris-InVehicleSoftware" --target-repo "powermanagerd" --queue-only --target-repo-visibility private }
+$RepoMigrations["powermanagerd"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "pulseaudio" --github-target-org "Polaris-InVehicleSoftware" --target-repo "pulseaudio" --queue-only --target-repo-visibility private }
+$RepoMigrations["pulseaudio"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "qmapboxgl" --github-target-org "Polaris-InVehicleSoftware" --target-repo "qmapboxgl" --queue-only --target-repo-visibility private }
+$RepoMigrations["qmapboxgl"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "ridecommand-sync" --github-target-org "Polaris-InVehicleSoftware" --target-repo "ridecommand-sync" --queue-only --target-repo-visibility private }
+$RepoMigrations["ridecommand-sync"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "ridecommandsync-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "ridecommandsync-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["ridecommandsync-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "security-plugin" --github-target-org "Polaris-InVehicleSoftware" --target-repo "security-plugin" --queue-only --target-repo-visibility private }
+$RepoMigrations["security-plugin"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "sfi-linux-chardev-module" --github-target-org "Polaris-InVehicleSoftware" --target-repo "sfi-linux-chardev-module" --queue-only --target-repo-visibility private }
+$RepoMigrations["sfi-linux-chardev-module"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "speaker-hal" --github-target-org "Polaris-InVehicleSoftware" --target-repo "speaker-hal" --queue-only --target-repo-visibility private }
+$RepoMigrations["speaker-hal"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "system-info-library" --github-target-org "Polaris-InVehicleSoftware" --target-repo "system-info-library" --queue-only --target-repo-visibility private }
+$RepoMigrations["system-info-library"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "timezone-service" --github-target-org "Polaris-InVehicleSoftware" --target-repo "timezone-service" --queue-only --target-repo-visibility private }
+$RepoMigrations["timezone-service"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "ubx" --github-target-org "Polaris-InVehicleSoftware" --target-repo "ubx" --queue-only --target-repo-visibility private }
+$RepoMigrations["ubx"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "ubxfwupdate" --github-target-org "Polaris-InVehicleSoftware" --target-repo "ubxfwupdate" --queue-only --target-repo-visibility private }
+$RepoMigrations["ubxfwupdate"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "variant-config-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "variant-config-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["variant-config-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "vehicle-services-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "vehicle-services-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["vehicle-services-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "venus-styles" --github-target-org "Polaris-InVehicleSoftware" --target-repo "venus-styles" --queue-only --target-repo-visibility private }
+$RepoMigrations["venus-styles"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "vip-rcip" --github-target-org "Polaris-InVehicleSoftware" --target-repo "vip-rcip" --queue-only --target-repo-visibility private }
+$RepoMigrations["vip-rcip"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "vpro-vnc" --github-target-org "Polaris-InVehicleSoftware" --target-repo "vpro-vnc" --queue-only --target-repo-visibility private }
+$RepoMigrations["vpro-vnc"] = $MigrationID
+
+$MigrationID = ExecAndGetMigrationID { gh gei migrate-repo --github-source-org "Trail-Tech" --source-repo "winchctrl" --github-target-org "Polaris-InVehicleSoftware" --target-repo "winchctrl" --queue-only --target-repo-visibility private }
+$RepoMigrations["winchctrl"] = $MigrationID
+
+
+# =========== Waiting for all migrations to finish for Organization: Trail-Tech ===========
+
+if ($RepoMigrations["apple-mfid-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["apple-mfid-rcip"] }
+if ($RepoMigrations["apple-mfid-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["audio-hal"]) { gh gei wait-for-migration --migration-id $RepoMigrations["audio-hal"] }
+if ($RepoMigrations["audio-hal"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["audiomanager-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["audiomanager-rcip"] }
+if ($RepoMigrations["audiomanager-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["backlightd"]) { gh gei wait-for-migration --migration-id $RepoMigrations["backlightd"] }
+if ($RepoMigrations["backlightd"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["bluetooth-connection-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["bluetooth-connection-rcip"] }
+if ($RepoMigrations["bluetooth-connection-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["bluetooth-message-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["bluetooth-message-rcip"] }
+if ($RepoMigrations["bluetooth-message-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["bluetooth-phonebook-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["bluetooth-phonebook-rcip"] }
+if ($RepoMigrations["bluetooth-phonebook-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["bluetooth-telephony-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["bluetooth-telephony-rcip"] }
+if ($RepoMigrations["bluetooth-telephony-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["bluez5"]) { gh gei wait-for-migration --migration-id $RepoMigrations["bluez5"] }
+if ($RepoMigrations["bluez5"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["broadcom-bluetooth-firmware"]) { gh gei wait-for-migration --migration-id $RepoMigrations["broadcom-bluetooth-firmware"] }
+if ($RepoMigrations["broadcom-bluetooth-firmware"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["c2b-fw"]) { gh gei wait-for-migration --migration-id $RepoMigrations["c2b-fw"] }
+if ($RepoMigrations["c2b-fw"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["common-projection-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["common-projection-rcip"] }
+if ($RepoMigrations["common-projection-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["cspi-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["cspi-plugin"] }
+if ($RepoMigrations["cspi-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["cvcproxy"]) { gh gei wait-for-migration --migration-id $RepoMigrations["cvcproxy"] }
+if ($RepoMigrations["cvcproxy"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["engine-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["engine-plugin"] }
+if ($RepoMigrations["engine-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["environment-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["environment-plugin"] }
+if ($RepoMigrations["environment-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["epreload-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["epreload-plugin"] }
+if ($RepoMigrations["epreload-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["gear-simulator"]) { gh gei wait-for-migration --migration-id $RepoMigrations["gear-simulator"] }
+if ($RepoMigrations["gear-simulator"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["geodataservice"]) { gh gei wait-for-migration --migration-id $RepoMigrations["geodataservice"] }
+if ($RepoMigrations["geodataservice"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["group-ride-library"]) { gh gei wait-for-migration --migration-id $RepoMigrations["group-ride-library"] }
+if ($RepoMigrations["group-ride-library"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["group-ride-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["group-ride-plugin"] }
+if ($RepoMigrations["group-ride-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["group-ride-service"]) { gh gei wait-for-migration --migration-id $RepoMigrations["group-ride-service"] }
+if ($RepoMigrations["group-ride-service"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["hcm-tools"]) { gh gei wait-for-migration --migration-id $RepoMigrations["hcm-tools"] }
+if ($RepoMigrations["hcm-tools"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["janus"]) { gh gei wait-for-migration --migration-id $RepoMigrations["janus"] }
+if ($RepoMigrations["janus"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["lib-apple-commplugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["lib-apple-commplugin"] }
+if ($RepoMigrations["lib-apple-commplugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libcvcproxy"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libcvcproxy"] }
+if ($RepoMigrations["libcvcproxy"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libdbuswrapper"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libdbuswrapper"] }
+if ($RepoMigrations["libdbuswrapper"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libdebuglogger"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libdebuglogger"] }
+if ($RepoMigrations["libdebuglogger"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libmap-data"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libmap-data"] }
+if ($RepoMigrations["libmap-data"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libmodemmanager"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libmodemmanager"] }
+if ($RepoMigrations["libmodemmanager"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libpolaris-cvc"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libpolaris-cvc"] }
+if ($RepoMigrations["libpolaris-cvc"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libpolaris-logger"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libpolaris-logger"] }
+if ($RepoMigrations["libpolaris-logger"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libpolaris-user"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libpolaris-user"] }
+if ($RepoMigrations["libpolaris-user"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libridecommandsync"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libridecommandsync"] }
+if ($RepoMigrations["libridecommandsync"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libvehicle"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libvehicle"] }
+if ($RepoMigrations["libvehicle"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["libvehicle-adaptor"]) { gh gei wait-for-migration --migration-id $RepoMigrations["libvehicle-adaptor"] }
+if ($RepoMigrations["libvehicle-adaptor"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["map-data-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["map-data-plugin"] }
+if ($RepoMigrations["map-data-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["map-data-plugin-key"]) { gh gei wait-for-migration --migration-id $RepoMigrations["map-data-plugin-key"] }
+if ($RepoMigrations["map-data-plugin-key"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["media-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["media-rcip"] }
+if ($RepoMigrations["media-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["modemmanager-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["modemmanager-plugin"] }
+if ($RepoMigrations["modemmanager-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-carplay-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-carplay-rcip"] }
+if ($RepoMigrations["polaris-carplay-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-common-infra-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-common-infra-rcip"] }
+if ($RepoMigrations["polaris-common-infra-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-disks"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-disks"] }
+if ($RepoMigrations["polaris-disks"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-gps"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-gps"] }
+if ($RepoMigrations["polaris-gps"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-logger"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-logger"] }
+if ($RepoMigrations["polaris-logger"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-logger-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-logger-plugin"] }
+if ($RepoMigrations["polaris-logger-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-persistence"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-persistence"] }
+if ($RepoMigrations["polaris-persistence"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-styles"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-styles"] }
+if ($RepoMigrations["polaris-styles"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-thermald"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-thermald"] }
+if ($RepoMigrations["polaris-thermald"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-tiles"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-tiles"] }
+if ($RepoMigrations["polaris-tiles"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-tuner-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-tuner-rcip"] }
+if ($RepoMigrations["polaris-tuner-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-user"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-user"] }
+if ($RepoMigrations["polaris-user"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-user-config"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-user-config"] }
+if ($RepoMigrations["polaris-user-config"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-user-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-user-plugin"] }
+if ($RepoMigrations["polaris-user-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-vcard-parser"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-vcard-parser"] }
+if ($RepoMigrations["polaris-vcard-parser"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["polaris-video"]) { gh gei wait-for-migration --migration-id $RepoMigrations["polaris-video"] }
+if ($RepoMigrations["polaris-video"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["pose-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["pose-plugin"] }
+if ($RepoMigrations["pose-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["powermanagerd"]) { gh gei wait-for-migration --migration-id $RepoMigrations["powermanagerd"] }
+if ($RepoMigrations["powermanagerd"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["pulseaudio"]) { gh gei wait-for-migration --migration-id $RepoMigrations["pulseaudio"] }
+if ($RepoMigrations["pulseaudio"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["qmapboxgl"]) { gh gei wait-for-migration --migration-id $RepoMigrations["qmapboxgl"] }
+if ($RepoMigrations["qmapboxgl"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["ridecommand-sync"]) { gh gei wait-for-migration --migration-id $RepoMigrations["ridecommand-sync"] }
+if ($RepoMigrations["ridecommand-sync"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["ridecommandsync-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["ridecommandsync-plugin"] }
+if ($RepoMigrations["ridecommandsync-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["security-plugin"]) { gh gei wait-for-migration --migration-id $RepoMigrations["security-plugin"] }
+if ($RepoMigrations["security-plugin"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["sfi-linux-chardev-module"]) { gh gei wait-for-migration --migration-id $RepoMigrations["sfi-linux-chardev-module"] }
+if ($RepoMigrations["sfi-linux-chardev-module"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["speaker-hal"]) { gh gei wait-for-migration --migration-id $RepoMigrations["speaker-hal"] }
+if ($RepoMigrations["speaker-hal"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["system-info-library"]) { gh gei wait-for-migration --migration-id $RepoMigrations["system-info-library"] }
+if ($RepoMigrations["system-info-library"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["timezone-service"]) { gh gei wait-for-migration --migration-id $RepoMigrations["timezone-service"] }
+if ($RepoMigrations["timezone-service"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["ubx"]) { gh gei wait-for-migration --migration-id $RepoMigrations["ubx"] }
+if ($RepoMigrations["ubx"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["ubxfwupdate"]) { gh gei wait-for-migration --migration-id $RepoMigrations["ubxfwupdate"] }
+if ($RepoMigrations["ubxfwupdate"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["variant-config-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["variant-config-rcip"] }
+if ($RepoMigrations["variant-config-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["vehicle-services-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["vehicle-services-rcip"] }
+if ($RepoMigrations["vehicle-services-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["venus-styles"]) { gh gei wait-for-migration --migration-id $RepoMigrations["venus-styles"] }
+if ($RepoMigrations["venus-styles"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["vip-rcip"]) { gh gei wait-for-migration --migration-id $RepoMigrations["vip-rcip"] }
+if ($RepoMigrations["vip-rcip"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["vpro-vnc"]) { gh gei wait-for-migration --migration-id $RepoMigrations["vpro-vnc"] }
+if ($RepoMigrations["vpro-vnc"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+if ($RepoMigrations["winchctrl"]) { gh gei wait-for-migration --migration-id $RepoMigrations["winchctrl"] }
+if ($RepoMigrations["winchctrl"] -and $lastexitcode -eq 0) { $Succeeded++ } else { $Failed++ }
+
+
+Write-Host =============== Summary ===============
+Write-Host Total number of successful migrations: $Succeeded
+Write-Host Total number of failed migrations: $Failed
+
+if ($Failed -ne 0) {
+    exit 1
+}
