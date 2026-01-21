@@ -1,0 +1,204 @@
+#!/usr/bin/env pwsh
+
+<#
+.SYNOPSIS
+    Migrates GitHub repositories from source organization to target organization.
+
+.DESCRIPTION
+    This script migrates multiple repositories using GitHub Enterprise Importer (GEI).
+    Repository names can be provided via parameter, file, or pipeline input.
+
+.PARAMETER SourceOrg
+    Source GitHub organization name
+
+.PARAMETER TargetOrg
+    Target GitHub organization name
+
+.PARAMETER RepoNames
+    Array of repository names to migrate
+
+.PARAMETER RepoListFile
+    Path to a text file containing repository names (one per line)
+
+.PARAMETER TargetVisibility
+    Visibility for target repositories (private or public). Default: private
+
+.PARAMETER KeepSameName
+    If set, uses the same repository name in target org. Default: true
+
+.EXAMPLE
+    .\migrate-repos.ps1 -SourceOrg "Trail-Tech" -TargetOrg "Polaris-InVehicleSoftware" -RepoNames "audio-hal","bluez","janus"
+
+.EXAMPLE
+    .\migrate-repos.ps1 -SourceOrg "Trail-Tech" -TargetOrg "Polaris-InVehicleSoftware" -RepoListFile "repos.txt"
+
+.EXAMPLE
+    Get-Content repos.txt | .\migrate-repos.ps1 -SourceOrg "Trail-Tech" -TargetOrg "Polaris-InVehicleSoftware"
+#>
+
+param (
+    [Parameter(Mandatory = $true)]
+    [string]$SourceOrg,
+
+    [Parameter(Mandatory = $true)]
+    [string]$TargetOrg,
+
+    [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
+    [string[]]$RepoNames,
+
+    [Parameter(Mandatory = $false)]
+    [string]$RepoListFile,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("private", "public")]
+    [string]$TargetVisibility = "private",
+
+    [Parameter(Mandatory = $false)]
+    [bool]$KeepSameName = $true
+)
+
+begin {
+    # Initialize collections
+    $allRepoNames = @()
+    $RepoMigrations = [ordered]@{}
+    $Succeeded = 0
+    $Failed = 0
+
+    # Helper function to execute migration and extract ID
+    function ExecAndGetMigrationID {
+        param (
+            [scriptblock]$ScriptBlock
+        )
+        $MigrationID = & @ScriptBlock | ForEach-Object {
+            Write-Host $_
+            $_
+        } | Select-String -Pattern "\(ID: (.+)\)" | ForEach-Object { $_.matches.groups[1] }
+        return $MigrationID
+    }
+
+    # Validate GH_PAT environment variable
+    if (-not $env:GH_PAT) {
+        Write-Error "GH_PAT environment variable must be set to a valid GitHub Personal Access Token with the appropriate scopes."
+        Write-Error "For more information see https://docs.github.com/en/migrations/using-github-enterprise-importer/preparing-to-migrate-with-github-enterprise-importer/managing-access-for-github-enterprise-importer#creating-a-personal-access-token-for-github-enterprise-importer"
+        exit 1
+    } else {
+        Write-Host "GH_PAT environment variable is set and will be used to authenticate to GitHub." -ForegroundColor Green
+    }
+
+    # Load repositories from file if specified
+    if ($RepoListFile) {
+        if (Test-Path $RepoListFile) {
+            Write-Host "Loading repositories from file: $RepoListFile" -ForegroundColor Cyan
+            $allRepoNames += Get-Content $RepoListFile | Where-Object { $_.Trim() -ne "" -and -not $_.StartsWith("#") }
+        } else {
+            Write-Error "Repository list file not found: $RepoListFile"
+            exit 1
+        }
+    }
+
+    # Add repositories from RepoNames parameter
+    if ($RepoNames) {
+        $allRepoNames += $RepoNames
+    }
+
+    Write-Host "`n=========== Migration Configuration ===========" -ForegroundColor Cyan
+    Write-Host "Source Organization: $SourceOrg"
+    Write-Host "Target Organization: $TargetOrg"
+    Write-Host "Target Visibility: $TargetVisibility"
+    Write-Host "Total Repositories: $($allRepoNames.Count)"
+    Write-Host "===============================================`n" -ForegroundColor Cyan
+}
+
+process {
+    # Handle pipeline input
+    if ($_ -and $_ -is [string]) {
+        $allRepoNames += $_
+    }
+}
+
+end {
+    # Remove duplicates and empty entries
+    $allRepoNames = $allRepoNames | Where-Object { $_ } | Select-Object -Unique
+
+    if ($allRepoNames.Count -eq 0) {
+        Write-Error "No repositories specified. Use -RepoNames, -RepoListFile, or pipe repository names."
+        exit 1
+    }
+
+    # =========== Queuing Phase ===========
+    Write-Host "=========== Queuing Migrations ===========" -ForegroundColor Yellow
+    
+    foreach ($repoName in $allRepoNames) {
+        $repoName = $repoName.Trim()
+        
+        if ([string]::IsNullOrWhiteSpace($repoName)) {
+            continue
+        }
+
+        $targetRepoName = if ($KeepSameName) { $repoName } else { $repoName }
+        
+        Write-Host "Queuing: $repoName -> $targetRepoName" -ForegroundColor Cyan
+        
+        try {
+            $MigrationID = ExecAndGetMigrationID {
+                gh gei migrate-repo `
+                    --github-source-org $SourceOrg `
+                    --source-repo $repoName `
+                    --github-target-org $TargetOrg `
+                    --target-repo $targetRepoName `
+                    --queue-only `
+                    --target-repo-visibility $TargetVisibility
+            }
+            
+            if ($MigrationID) {
+                $RepoMigrations[$repoName] = $MigrationID
+                Write-Host "  ✓ Queued successfully (ID: $MigrationID)" -ForegroundColor Green
+            } else {
+                Write-Warning "  ✗ Failed to queue migration for $repoName"
+            }
+        } catch {
+            Write-Error "  ✗ Error queuing $repoName: $_"
+        }
+        
+        Write-Host ""
+    }
+
+    # =========== Waiting Phase ===========
+    Write-Host "`n=========== Waiting for Migrations to Complete ===========" -ForegroundColor Yellow
+    
+    $index = 1
+    foreach ($repo in $RepoMigrations.Keys) {
+        $migrationId = $RepoMigrations[$repo]
+        
+        Write-Host "[$index/$($RepoMigrations.Count)] Waiting for: $repo (ID: $migrationId)" -ForegroundColor Cyan
+        
+        try {
+            gh gei wait-for-migration --migration-id $migrationId
+            
+            if ($LASTEXITCODE -eq 0) {
+                $Succeeded++
+                Write-Host "  ✓ Migration completed successfully" -ForegroundColor Green
+            } else {
+                $Failed++
+                Write-Host "  ✗ Migration failed" -ForegroundColor Red
+            }
+        } catch {
+            $Failed++
+            Write-Error "  ✗ Error waiting for migration: $_"
+        }
+        
+        $index++
+        Write-Host ""
+    }
+
+    # =========== Summary ===========
+    Write-Host "`n=============== Migration Summary ===============" -ForegroundColor Cyan
+    Write-Host "Total Repositories Processed: $($RepoMigrations.Count)"
+    Write-Host "Successful Migrations: $Succeeded" -ForegroundColor Green
+    Write-Host "Failed Migrations: $Failed" -ForegroundColor Red
+    Write-Host "================================================`n" -ForegroundColor Cyan
+
+    if ($Failed -ne 0) {
+        exit 1
+    }
+}
