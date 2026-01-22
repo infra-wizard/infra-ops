@@ -1,0 +1,58 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ .Values.name | default "java-apps" }}
+  namespace: {{ .Values.namespace | default "argocd" }}
+spec:
+  generators:
+    - list:
+        elements:
+          {{- range .Values.applications }}
+          - service: {{ .service }}
+            namespace: {{ .namespace }}
+            repository: {{ .repository }}
+            imageTag: {{ .imageTag | quote }}
+            {{- if .secretName }}
+            secretName: {{ .secretName }}
+            {{- end }}
+            {{- if .shareName }}
+            shareName: {{ .shareName }}
+            {{- end }}
+            helmPath: {{ .helmPath }}
+            {{- if .replicaCount }}
+            replicaCount: {{ .replicaCount | quote }}
+            {{- end }}
+          {{- end }}
+  template:
+    metadata:
+      labels:
+        service: '{{{{service}}}}'
+    spec:
+      project: {{ .Values.project | default "default" }}
+      source:
+        repoURL: {{ .Values.helmRepo.url }}
+        targetRevision: {{ .Values.helmRepo.targetRevision | default "main" }}
+        path: '{{{{helmPath}}}}'
+        helm:
+          releaseName: '{{{{service}}}}'
+          parameters:
+            - name: image.repository
+              value: '{{{{repository}}}}'
+            - name: image.tag
+              value: '{{{{imageTag}}}}'
+            {{- if .secretName }}
+            - name: azurefile.secretName
+              value: '{{{{secretName}}}}'
+            {{- end }}
+            {{- if .shareName }}
+            - name: azurefile.shareName
+              value: '{{{{shareName}}}}'
+            {{- end }}
+      destination:
+        server: {{ .Values.destination.server | default "https://kubernetes.default.svc" }}
+        namespace: '{{{{namespace}}}}'
+      syncPolicy:
+        syncOptions:
+          {{- range .Values.syncPolicy.syncOptions }}
+          - {{ . }}
+          {{- end }}
