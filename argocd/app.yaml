@@ -26,31 +26,29 @@ spec:
   template:
     metadata:
       labels:
-        service: '{{{{service}}}}'
+        service: '{{service}}'
     spec:
       project: {{ .Values.project | default "default" }}
       source:
         repoURL: {{ .Values.helmRepo.url }}
         targetRevision: {{ .Values.helmRepo.targetRevision | default "main" }}
-        path: '{{{{helmPath}}}}'
+        path: '{{helmPath}}'
         helm:
-          releaseName: '{{{{service}}}}'
+          releaseName: '{{service}}'
           parameters:
             - name: image.repository
-              value: '{{{{repository}}}}'
+              value: '{{repository}}'
             - name: image.tag
-              value: '{{{{imageTag}}}}'
-            {{- if .secretName }}
+              value: '{{imageTag}}'
             - name: azurefile.secretName
-              value: '{{{{secretName}}}}'
-            {{- end }}
-            {{- if .shareName }}
+              value: '{{secretName}}'
             - name: azurefile.shareName
-              value: '{{{{shareName}}}}'
-            {{- end }}
+              value: '{{shareName}}'
+            - name: replicaCount
+              value: '{{replicaCount}}'
       destination:
         server: {{ .Values.destination.server | default "https://kubernetes.default.svc" }}
-        namespace: '{{{{namespace}}}}'
+        namespace: '{{namespace}}'
       syncPolicy:
         syncOptions:
           {{- range .Values.syncPolicy.syncOptions }}
