@@ -1,11 +1,8 @@
 gh api /orgs/Polaris-InVehicleSoftware/migrations
 
-# Check if migration lock exists
-gh api /repos/Trail-Tech/devops_playground --jq '.locked'
-
-# Remove migration lock via API
-gh api --method DELETE -H "Accept: application/vnd.github+json" \
-  /repos/Trail-Tech/devops_playground/lock
+curl -H "Authorization: Bearer GITHUB_ACCESS_TOKEN" -X DELETE \
+  -H "Accept: application/vnd.github.wyandotte-preview+json" \
+  https://api.github.com/orgs/ORG-NAME/migrations/ID/repos/REPO_NAME/lock
 
 Get all repos and their collaborators
 curl -s -H "Authorization: token $TOKEN" \
