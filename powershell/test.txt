@@ -1,0 +1,14 @@
+# Set your token
+TOKEN="your_pat_token_here"
+
+# List collaborators for a repo
+curl -H "Authorization: token $TOKEN" \
+  https://api.github.com/repos/OWNER/REPO/collaborators
+
+# List all your repos
+curl -H "Authorization: token $TOKEN" \
+  https://api.github.com/user/repos?per_page=100
+
+# List org repos
+curl -H "Authorization: token $TOKEN" \
+  https://api.github.com/orgs/ORG_NAME/repos?per_page=100
