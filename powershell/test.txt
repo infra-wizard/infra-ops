@@ -4,6 +4,9 @@ curl -H "Authorization: Bearer GITHUB_ACCESS_TOKEN" -X DELETE \
   -H "Accept: application/vnd.github.wyandotte-preview+json" \
   https://api.github.com/orgs/ORG-NAME/migrations/ID/repos/REPO_NAME/lock
 
+gh api --method DELETE \
+  -H "Accept: application/vnd.github+json" \
+  /repos/Trail-Tech/test-migration/lock
 
 gh api --method DELETE \
   -H "Accept: application/vnd.github+json" \
