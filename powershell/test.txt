@@ -1,8 +1,14 @@
 gh api /orgs/Polaris-InVehicleSoftware/migrations
 
-curl -H "Authorization: Bearer GITHUB_ACCESS_TOKEN" -X DELETE \
-  -H "Accept: application/vnd.github.wyandotte-preview+json" \
-  https://api.github.com/orgs/ORG-NAME/migrations/ID/repos/REPO_NAME/lock
+# Set the classic token
+export GH_TOKEN="ghp_your_classic_token_here"
+
+# Or use it directly
+gh api --method DELETE \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ghp_your_classic_token_here" \
+  /orgs/Trail-Tech/migrations/unlock/repos/test-migration
+
 
 gh api --method DELETE \
   -H "Accept: application/vnd.github+json" \
