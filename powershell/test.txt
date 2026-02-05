@@ -9,6 +9,9 @@ while read repo; do
 done
 
 
+curl -s -H "Authorization: token $TOKEN" \
+  "https://api.github.com/repos/Trail-Tech/koala/teams" | \
+  jq -r '.[] | "\(.name) | \(.permission)"'
 
 
 
