@@ -13,6 +13,9 @@ curl -s -H "Authorization: token $TOKEN" \
   "https://api.github.com/repos/Trail-Tech/koala/teams" | \
   jq -r '.[] | "\(.name) | \(.permission)"'
 
+url -s -H "Authorization: token $TOKEN" \
+  "https://api.github.com/repos/Trail-Tech/koala/teams" | \
+  jq -r '.[] | "\(.name),Trail-Tech/koala,\(.permission)"'
 
 
 curl -s -H "Authorization: token $TOKEN" \
