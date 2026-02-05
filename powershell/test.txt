@@ -1,5 +1,7 @@
 gh api /orgs/Polaris-InVehicleSoftware/migrations
 
+gh repo archive Trail-Tech/test-migration --yes
+
 # Set the classic token
 export GH_TOKEN="ghp_your_classic_token_here"
 
