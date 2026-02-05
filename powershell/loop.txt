@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Configuration
+TOKEN="ghp_7yhVjfW2G9SqCvjD7KIDPttrOnhGkk0cWO9S"
+ORG="Polaris-InVehicleSoftware"
+
+# Read the mapping file line by line
+while IFS= read -r line || [ -n "$line" ]; do
+    # Skip empty lines
+    if [ -z "$line" ]; then
+        continue
+    fi
+    
+    # Parse the line to extract team slug, repository, and permission
+    # Format: <team> <repo> <permission>
+    TEAM_SLUG=$(echo "$line" | awk '{print $1}')
+    REPO=$(echo "$line" | awk '{print $2}')
+    PERMISSION=$(echo "$line" | awk '{print $3}')
+    
+    echo "Processing: Team=$TEAM_SLUG, Repo=$REPO, Permission=$PERMISSION"
+    
+    # Execute the curl command
+    curl -X PUT \
+      -H "Authorization: token $TOKEN" \
+      -H "Accept: application/vnd.github.v3+json" \
+      "https://api.github.com/orgs/$ORG/teams/$TEAM_SLUG/repos/$ORG/$REPO" \
+      -d "{\"permission\":\"$PERMISSION\"}"
+    
+    echo ""
+    echo "---"
+    
+done < "mapping-list.txt"
+
+echo "Done processing all repositories!"
