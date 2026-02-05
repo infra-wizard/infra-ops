@@ -2,6 +2,12 @@ gh api /orgs/Polaris-InVehicleSoftware/migrations
 
 gh repo archive Trail-Tech/test-migration --yes
 
+gh api --method PATCH \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer ghp_your_classic_token_here" \
+  /repos/Trail-Tech/test-migration \
+  -f archived=true
+
 # Set the classic token
 export GH_TOKEN="ghp_your_classic_token_here"
 
