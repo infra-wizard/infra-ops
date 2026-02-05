@@ -1,4 +1,7 @@
- Get all repos and their collaborators
+gh api /orgs/Polaris-InVehicleSoftware/migrations
+
+
+Get all repos and their collaborators
 curl -s -H "Authorization: token $TOKEN" \
   "https://api.github.com/user/repos?per_page=100&affiliation=owner,collaborator,organization_member" | \
 jq -r '.[].full_name' | \
