@@ -7,3 +7,22 @@ while read repo; do
     "https://api.github.com/repos/$repo/collaborators?affiliation=all" | \
     jq -r --arg repo "$repo" '.[] | "\(.login) | \($repo) | \(.role_name)"'
 done
+
+
+
+
+
+curl -s -H "Authorization: token $TOKEN" \
+  "https://api.github.com/repos/Trail-Tech/koala/collaborators?affiliation=all" | \
+  jq -r '.[] | "\(.login) | \(.role_name)"'
+
+
+printf "%-20s | %-10s\n" "USERNAME" "PERMISSION"
+printf "%.0s-" {1..35}; echo
+
+curl -s -H "Authorization: token $TOKEN" \
+  "https://api.github.com/repos/Trail-Tech/koala/collaborators?affiliation=all" | \
+  jq -r '.[] | "\(.login)|\(.role_name)"' | \
+  while IFS='|' read user perm; do
+    printf "%-20s | %-10s\n" "$user" "$perm"
+  done
