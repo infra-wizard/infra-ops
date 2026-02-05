@@ -32,3 +32,16 @@ curl -s -H "Authorization: token $TOKEN" \
   while IFS='|' read user perm; do
     printf "%-20s | %-10s\n" "$user" "$perm"
   done
+
+
+TOKEN="your_pat_token_here"
+ORG="Trail-Tech"
+TEAM_SLUG="team-name"  # Team slug (URL-friendly name)
+REPO="koala"
+PERMISSION="push"  # Options: pull, push, admin, maintain, triage
+
+curl -X PUT \
+  -H "Authorization: token $TOKEN" \
+  -H "Accept: application/vnd.github.v3+json" \
+  "https://api.github.com/orgs/$ORG/teams/$TEAM_SLUG/repos/$ORG/$REPO" \
+  -d "{\"permission\":\"$PERMISSION\"}"
