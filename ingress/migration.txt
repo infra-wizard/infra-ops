@@ -1,5 +1,7 @@
 # Istio on AKS — End-to-End Setup Guide
 
+curl -sk -o /dev/null -w "%{http_code}" https://172.20.43.253/ -H "Host: t1abbottlinkuser.products.abbott"
+
 > Complete walkthrough including common errors and fixes.
 
 ---
