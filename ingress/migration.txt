@@ -1,0 +1,733 @@
+# Istio on AKS — End-to-End Setup Guide
+
+> Complete walkthrough including common errors and fixes.
+
+---
+
+## Prerequisites
+
+- Azure CLI (`az`) installed and logged in
+- `kubectl` installed
+- `helm` installed
+
+---
+
+## Step 1: Create the AKS Cluster
+
+```bash
+# Set variables
+RESOURCE_GROUP="DefaultResourceGroup-WUS2"
+CLUSTER_NAME="istio"
+LOCATION="westus"
+
+# Create resource group (if it doesn't exist)
+az group create --name $RESOURCE_GROUP --location $LOCATION
+
+# Create AKS cluster
+az aks create \
+  --resource-group $RESOURCE_GROUP \
+  --name $CLUSTER_NAME \
+  --location $LOCATION \
+  --node-count 2 \
+  --node-vm-size Standard_D4s_v3 \
+  --network-plugin azure \
+  --generate-ssh-keys
+
+# Get credentials
+az aks get-credentials --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME
+```
+
+Verify the cluster is ready:
+
+```bash
+kubectl get nodes
+```
+
+---
+
+## Step 2: Install Istio via Helm
+
+### 2a. Add the Istio Helm repository
+
+```bash
+helm repo add istio https://istio-release.storage.googleapis.com/charts
+helm repo update
+```
+
+### 2b. Install Istio base (CRDs)
+
+```bash
+kubectl create namespace istio-system
+
+helm install istio-base istio/base \
+  -n istio-system
+```
+
+### 2c. Install istiod (control plane)
+
+```bash
+helm install istiod istio/istiod \
+  -n istio-system \
+  --wait
+```
+
+Verify istiod is running:
+
+```bash
+kubectl get pods -n istio-system
+# Expected: istiod pod in Running state
+```
+
+### 2d. Install Istio Ingress Gateway
+
+```bash
+kubectl create namespace istio-ingress
+
+helm install istio-ingress istio/gateway \
+  -n istio-ingress
+```
+
+Verify the ingress gateway:
+
+```bash
+kubectl get pods -n istio-ingress
+# Expected: istio-ingress pod in Running state (1/1)
+
+kubectl get svc -n istio-ingress
+# Expected: LoadBalancer service with an EXTERNAL-IP
+```
+
+> **Note the External IP** — you'll need it later. In our case: `20.57.218.80`
+
+---
+
+## Step 3: Enable Sidecar Injection
+
+Label the `default` namespace so Istio automatically injects Envoy sidecar proxies into every pod:
+
+```bash
+kubectl label namespace default istio-injection=enabled
+```
+
+Verify:
+
+```bash
+kubectl get namespace default --show-labels
+# Should show: istio-injection=enabled
+```
+
+---
+
+## Step 4: Deploy the Bookinfo Sample Application
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/bookinfo/platform/kube/bookinfo.yaml
+```
+
+Verify all pods have 2/2 containers (app + sidecar):
+
+```bash
+kubectl get pods
+# Expected output:
+# details-v1-xxx        2/2     Running
+# productpage-v1-xxx    2/2     Running
+# ratings-v1-xxx        2/2     Running
+# reviews-v1-xxx        2/2     Running
+# reviews-v2-xxx        2/2     Running
+# reviews-v3-xxx        2/2     Running
+```
+
+> If pods show `1/1` instead of `2/2`, the sidecar isn't injected. Make sure you labeled the namespace **before** deploying the app. If you labeled after, restart the pods:
+> ```bash
+> kubectl rollout restart deployment --all
+> ```
+
+---
+
+## Step 5: Configure Istio Gateway and VirtualService
+
+### 5a. Create the Gateway
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: bookinfo-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingress
+  servers:
+  - hosts:
+    - "*"
+    port:
+      name: http
+      number: 80
+      protocol: HTTP
+EOF
+```
+
+### 5b. Create the VirtualService
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: bookinfo
+  namespace: default
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - bookinfo-gateway
+  http:
+  - match:
+    - uri:
+        exact: /productpage
+    - uri:
+        prefix: /static
+    - uri:
+        exact: /login
+    - uri:
+        exact: /logout
+    - uri:
+        prefix: /api/v1/products
+    route:
+    - destination:
+        host: productpage
+        port:
+          number: 9080
+EOF
+```
+
+### 5c. Verify HTTP Access
+
+```bash
+export INGRESS_IP=$(kubectl get svc istio-ingress -n istio-ingress -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+curl -s -o /dev/null -w "%{http_code}" http://$INGRESS_IP/productpage
+# Expected: 200
+```
+
+---
+
+## Step 6: Enable HTTPS
+
+### 6a. Generate a Self-Signed TLS Certificate
+
+```bash
+openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 \
+  -subj "/O=bookinfo/CN=$INGRESS_IP" \
+  -addext "subjectAltName=IP:$INGRESS_IP" \
+  -keyout bookinfo-tls.key \
+  -out bookinfo-tls.crt
+```
+
+### 6b. Create the TLS Secret
+
+> **Important:** The secret must be in the **same namespace as the ingress gateway pod** (`istio-ingress`), not the Gateway resource's namespace.
+
+```bash
+kubectl create secret tls bookinfo-gateway-tls \
+  --cert=bookinfo-tls.crt \
+  --key=bookinfo-tls.key \
+  -n istio-ingress
+```
+
+### 6c. Update the Gateway to Add HTTPS
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: bookinfo-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingress
+  servers:
+  - hosts:
+    - "*"
+    port:
+      name: http
+      number: 80
+      protocol: HTTP
+  - hosts:
+    - "*"
+    port:
+      name: https
+      number: 443
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: bookinfo-gateway-tls
+EOF
+```
+
+### 6d. Verify HTTPS Access
+
+```bash
+curl -sk -o /dev/null -w "%{http_code}" https://$INGRESS_IP/productpage
+# Expected: 200
+```
+
+### 6e. Clean Up Certificate Files
+
+```bash
+rm -f bookinfo-tls.crt bookinfo-tls.key
+```
+
+---
+
+## Common Errors & Fixes
+
+### ❌ Error 1: Gateway selector mismatch — App returns no response
+
+**Symptom:** All pods are running (2/2), services exist, but `curl http://<IP>/productpage` hangs or returns nothing.
+
+**Root Cause:** The Gateway `selector` doesn't match the ingress gateway pod's labels.
+
+```yaml
+# ❌ WRONG — uses the old istioctl default label
+spec:
+  selector:
+    istio: ingressgateway
+
+# ✅ CORRECT — matches Helm-installed gateway pod label
+spec:
+  selector:
+    istio: ingress
+```
+
+**How to diagnose:**
+
+```bash
+# Check what labels the ingress pod actually has
+kubectl get pods -n istio-ingress --show-labels | grep istio=
+
+# You'll see: istio=ingress (NOT istio=ingressgateway)
+```
+
+**Why this happens:** The Istio docs and many tutorials use `istio: ingressgateway` which was the default label for gateways installed via `istioctl`. When using the Helm chart (`istio/gateway`), the default label is `istio: ingress`.
+
+---
+
+### ❌ Error 2: Gateway port mismatch — App returns no response
+
+**Symptom:** Same as above — the gateway selector is correct now, but the app still doesn't respond.
+
+**Root Cause:** The Gateway port number doesn't match the Service's `targetPort`.
+
+```yaml
+# ❌ WRONG — port 8080 doesn't match the Service targetPort
+spec:
+  servers:
+  - port:
+      number: 8080
+
+# ✅ CORRECT — matches Service targetPort 80
+spec:
+  servers:
+  - port:
+      number: 80
+```
+
+**How to diagnose:**
+
+```bash
+# Check what ports the ingress Service maps to
+kubectl get svc istio-ingress -n istio-ingress -o yaml | grep -A 5 "ports:"
+
+# You'll see targetPort: 80 for HTTP and targetPort: 443 for HTTPS
+# The Gateway port number must match these targetPorts
+```
+
+**Why this happens:** The Gateway port is the port the Envoy proxy listens on inside the pod. The Service's `targetPort` is the port traffic is forwarded to on the pod. If they don't match, Envoy never receives the traffic.
+
+---
+
+### ❌ Error 3: HTTPS not working — Connection refused or timeout on port 443
+
+**Symptom:** HTTP works fine, but `curl -sk https://<IP>/productpage` fails.
+
+**Root Cause:** No HTTPS server block in the Gateway, and no TLS certificate.
+
+**Fix — Three things needed:**
+
+1. **Generate/obtain a TLS certificate**
+2. **Create a TLS secret in the `istio-ingress` namespace** (not `default`)
+3. **Add an HTTPS server block to the Gateway** with `tls.mode: SIMPLE` and `credentialName`
+
+**How to diagnose:**
+
+```bash
+# Check if the Gateway has an HTTPS server
+kubectl get gateway bookinfo-gateway -o yaml | grep -A 10 "protocol: HTTPS"
+# If empty — no HTTPS configured
+
+# Check if a TLS secret exists in the correct namespace
+kubectl get secrets -n istio-ingress | grep tls
+# Must be in istio-ingress, not default
+```
+
+**Common sub-mistake:** Creating the TLS secret in the `default` namespace instead of `istio-ingress`. The ingress gateway pod looks for `credentialName` secrets **in its own namespace**.
+
+---
+
+## Migration: NGINX Ingress → Istio Gateway (ThingWorx Example)
+
+This section shows how to convert an existing NGINX Ingress resource to equivalent Istio resources, using the ThingWorx ingress as a real-world example.
+
+### NGINX Annotation → Istio Mapping
+
+| NGINX Annotation | Value | Istio Equivalent | Resource |
+|---|---|---|---|
+| `ingressClassName: nginx` | — | `Gateway` + `VirtualService` | Replaces the Ingress entirely |
+| `spec.tls[].secretName` | `dxu-aks-tls` | `Gateway.tls.credentialName` | Gateway |
+| `spec.rules[].host` | `t1abbottlinkuser.products.abbott` | `Gateway.servers[].hosts` + `VirtualService.hosts` | Gateway + VirtualService |
+| `spec.rules[].http.paths[].path: /` | Prefix `/` | `VirtualService.http[].match.uri.prefix: /` | VirtualService |
+| `backend-protocol: HTTPS` | Backend uses HTTPS | `DestinationRule.trafficPolicy.tls.mode: SIMPLE` | DestinationRule |
+| `app-root` | Redirect `/` → `/Thingworx/Runtime/...` | `VirtualService.http[].redirect` on exact `/` match | VirtualService |
+| `proxy-read-timeout: 600` | 600s | `VirtualService.http[].timeout: 600s` | VirtualService |
+| `proxy-send-timeout: 600` | 600s | Covered by the same `timeout` | VirtualService |
+| `proxy-body-size: 3072m` | 3072 MB | `EnvoyFilter` → `http_connection_manager.max_request_bytes` | EnvoyFilter |
+| `keep-alive-requests: 10000` | 10000 | `DestinationRule.connectionPool.http.h2UpgradePolicy` / `maxRequestsPerConnection` | DestinationRule |
+| `ssl-redirect: false` | No forced HTTPS | Don't set `httpsRedirect: true` in Gateway | Gateway (omit redirect) |
+| `force-ssl-redirect: false` | No forced HTTPS | Same as above | Gateway (omit redirect) |
+| `custom-http-errors: 500,502,503,504` + `default-backend: maintenance` | Show maintenance page on 5xx | `VirtualService.http[].retries` + separate VirtualService for fallback | VirtualService (partial — see notes) |
+| `defaultBackend: maintenance:80` | Fallback service | `VirtualService.http[].fault` or last route as catch-all | VirtualService |
+
+---
+
+### Step-by-Step Migration
+
+#### Step M1: Copy the TLS Secret to the `istio-ingress` Namespace
+
+The NGINX Ingress reads the TLS secret from the app namespace (`twx`). Istio reads it from the **gateway pod's namespace** (`istio-ingress`).
+
+```bash
+# Export the existing secret from twx namespace
+kubectl get secret dxu-aks-tls -n twx -o yaml \
+  | sed 's/namespace: twx/namespace: istio-ingress/' \
+  | kubectl apply -f -
+```
+
+Verify:
+
+```bash
+kubectl get secret dxu-aks-tls -n istio-ingress
+# Should show Type: kubernetes.io/tls
+```
+
+> **Important:** If the TLS cert is renewed (e.g., by cert-manager), you need to ensure it's also updated in `istio-ingress`. Consider using a cert-manager Certificate resource targeting the `istio-ingress` namespace directly.
+
+---
+
+#### Step M2: Enable Sidecar Injection on the `twx` Namespace
+
+```bash
+kubectl label namespace twx istio-injection=enabled
+
+# Restart all deployments to inject sidecars
+kubectl rollout restart deployment --all -n twx
+```
+
+Verify pods show `2/2`:
+
+```bash
+kubectl get pods -n twx
+```
+
+---
+
+#### Step M3: Create the Istio Gateway
+
+This replaces the `spec.tls` and host matching from the NGINX Ingress.
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: twx-gateway
+  namespace: twx
+spec:
+  selector:
+    istio: ingress                          # Must match ingress pod label
+  servers:
+  # HTTP — no redirect (ssl-redirect was false in nginx)
+  - hosts:
+    - "t1abbottlinkuser.products.abbott"
+    port:
+      name: http
+      number: 80
+      protocol: HTTP
+  # HTTPS — TLS termination using existing cert
+  - hosts:
+    - "t1abbottlinkuser.products.abbott"
+    port:
+      name: https
+      number: 443
+      protocol: HTTPS
+    tls:
+      mode: SIMPLE
+      credentialName: dxu-aks-tls           # Secret in istio-ingress namespace
+EOF
+```
+
+---
+
+#### Step M4: Create the VirtualService
+
+This replaces `spec.rules`, `app-root`, `proxy-read-timeout`, and `proxy-send-timeout`.
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: twx-thingworx
+  namespace: twx
+spec:
+  hosts:
+  - "t1abbottlinkuser.products.abbott"
+  gateways:
+  - twx-gateway
+  http:
+  # --- App Root Redirect ---
+  # Equivalent of: nginx.ingress.kubernetes.io/app-root
+  # Redirects exact "/" to the ThingWorx landing page
+  - match:
+    - uri:
+        exact: /
+    redirect:
+      uri: /Thingworx/Runtime/index.html?mashup=ABTLNK.LandingPage&forceClose=true&__enableBMF=true
+
+  # --- Main Route (catch-all) ---
+  # Equivalent of: path: / with pathType: Prefix
+  - match:
+    - uri:
+        prefix: /
+    route:
+    - destination:
+        host: twx-twx-thingworx.twx.svc.cluster.local
+        port:
+          number: 443                       # Backend HTTPS port
+    # Equivalent of: proxy-read-timeout: 600 & proxy-send-timeout: 600
+    timeout: 600s
+    retries:
+      attempts: 0                           # Disable retries (match nginx default)
+EOF
+```
+
+---
+
+#### Step M5: Create the DestinationRule
+
+This handles `backend-protocol: HTTPS` (tells Envoy to use TLS when connecting to the backend) and `keep-alive-requests`.
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: twx-thingworx
+  namespace: twx
+spec:
+  host: twx-twx-thingworx.twx.svc.cluster.local
+  trafficPolicy:
+    # --- Backend Protocol: HTTPS ---
+    # Equivalent of: nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    # Tells Envoy sidecar to originate TLS when connecting to the backend
+    tls:
+      mode: SIMPLE
+    connectionPool:
+      http:
+        # Equivalent of: keep-alive-requests: 10000
+        maxRequestsPerConnection: 10000
+        # Use HTTP/1.1 to backend (ThingWorx typically expects this)
+        h2UpgradePolicy: DO_NOT_UPGRADE
+EOF
+```
+
+---
+
+#### Step M6: Create the EnvoyFilter for Max Request Body Size
+
+This handles `proxy-body-size: 3072m`. Istio doesn't have a native annotation for this — an EnvoyFilter is required.
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: twx-max-body-size
+  namespace: istio-ingress
+spec:
+  workloadSelector:
+    labels:
+      istio: ingress
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.router
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.buffer
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.buffer.v3.Buffer
+          max_request_bytes: 3221225472    # 3072 MB = 3072 * 1024 * 1024
+EOF
+```
+
+---
+
+#### Step M7: Handle Custom Error Pages (Maintenance Backend)
+
+> **Note:** Istio doesn't have a direct equivalent of `custom-http-errors` + `default-backend`. The NGINX feature intercepts 5xx responses from the backend and replaces them with the maintenance page. In Istio, the closest options are:
+
+**Option A — Retry on 5xx (recommended):**
+
+Already partially handled in the VirtualService. If you want retries on 5xx:
+
+```yaml
+    retries:
+      attempts: 3
+      retryOn: 5xx
+```
+
+**Option B — Custom Lua filter for error page replacement:**
+
+This requires an EnvoyFilter with a Lua script that intercepts 5xx responses and redirects to the maintenance service. This is more complex — implement only if the maintenance page is critical.
+
+```bash
+cat <<'EOF' | kubectl apply -f -
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: twx-custom-error-page
+  namespace: istio-ingress
+spec:
+  workloadSelector:
+    labels:
+      istio: ingress
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.router
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.lua
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          default_source_code:
+            inline_string: |
+              function envoy_on_response(response_handle)
+                local status = response_handle:headers():get(":status")
+                if status == "500" or status == "502" or status == "503" or status == "504" then
+                  response_handle:headers():replace(":status", "503")
+                  response_handle:headers():replace("content-type", "text/html")
+                  response_handle:body():setBytes("<html><body><h1>Service Temporarily Unavailable</h1><p>Please try again later.</p></body></html>")
+                end
+              end
+EOF
+```
+
+---
+
+### Migration Checklist
+
+```
+[ ] 1. TLS secret copied to istio-ingress namespace
+[ ] 2. Sidecar injection enabled on twx namespace
+[ ] 3. All twx pods restarted and showing 2/2
+[ ] 4. Gateway created with correct selector (istio: ingress) and ports (80, 443)
+[ ] 5. VirtualService created with app-root redirect and 600s timeout
+[ ] 6. DestinationRule created for backend HTTPS and keep-alive
+[ ] 7. EnvoyFilter created for max request body size (3072m)
+[ ] 8. (Optional) Custom error page EnvoyFilter applied
+[ ] 9. DNS updated: t1abbottlinkuser.products.abbott → new Istio ingress IP
+[ ] 10. Old NGINX Ingress resource deleted
+[ ] 11. Verified: curl -sk https://t1abbottlinkuser.products.abbott/productpage returns 200
+```
+
+### Verification Commands (ThingWorx)
+
+```bash
+# Check Gateway
+kubectl get gateway twx-gateway -n twx -o yaml
+
+# Check VirtualService
+kubectl get virtualservice twx-thingworx -n twx -o yaml
+
+# Check DestinationRule
+kubectl get destinationrule twx-thingworx -n twx -o yaml
+
+# Check EnvoyFilter
+kubectl get envoyfilter -n istio-ingress
+
+# Test HTTPS (after DNS update)
+curl -sk -o /dev/null -w "%{http_code}" https://t1abbottlinkuser.products.abbott/
+
+# Test app-root redirect (should return 301/302 to ThingWorx landing page)
+curl -sk -o /dev/null -w "%{http_code} → %{redirect_url}\n" https://t1abbottlinkuser.products.abbott/
+
+# Check if backend TLS is working (from inside a pod)
+kubectl exec -n twx deploy/twx-twx-thingworx -c istio-proxy -- \
+  curl -s -o /dev/null -w "%{http_code}" https://localhost:<backend-port>/
+```
+
+---
+
+## Quick Reference — Final Working State
+
+| Resource | Namespace | Purpose |
+|----------|-----------|---------|
+| `istiod` | istio-system | Control plane |
+| `istio-ingress` (pod) | istio-ingress | Ingress proxy (Envoy) |
+| `istio-ingress` (svc) | istio-ingress | LoadBalancer → 80, 443 |
+| `bookinfo-gateway-tls` (secret) | istio-ingress | TLS cert for HTTPS |
+| `bookinfo-gateway` (Gateway) | default | Defines HTTP + HTTPS listeners |
+| `bookinfo` (VirtualService) | default | Routes /productpage → productpage:9080 |
+| Bookinfo pods (6 pods) | default | Sample microservices app |
+
+## Verification Commands
+
+```bash
+# Check all pods
+kubectl get pods --all-namespaces | grep -E 'default|istio'
+
+# Test HTTP
+curl -s -o /dev/null -w "HTTP: %{http_code}\n" http://$INGRESS_IP/productpage
+
+# Test HTTPS (skip cert verification for self-signed)
+curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://$INGRESS_IP/productpage
+
+# Check Gateway config
+kubectl get gateway bookinfo-gateway -o yaml
+
+# Check VirtualService config
+kubectl get virtualservice bookinfo -o yaml
+
+# Check ingress pod labels (for selector debugging)
+kubectl get pods -n istio-ingress --show-labels
+
+# Check ingress service ports (for port debugging)
+kubectl get svc istio-ingress -n istio-ingress -o yaml
+```
