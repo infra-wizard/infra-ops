@@ -1,8 +1,10 @@
 # Istio on AKS — End-to-End Setup Guide
 
-curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://172.20.43.253/ -H "Host: t1abbottlinkuser.products.abbott"
-
+# HTTP (this worked before — 301)
 curl -s -o /dev/null -w "HTTP: %{http_code}\n" http://172.20.43.253/ -H "Host: t1abbottlinkuser.products.abbott"
+
+# HTTPS
+curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://172.20.43.253/ -H "Host: t1abbottlinkuser.products.abbott"
 
 > Complete walkthrough including common errors and fixes.
 
