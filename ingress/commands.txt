@@ -1,0 +1,19 @@
+kubectl get gateway twx-gateway -n twx -o jsonpath='{.spec.servers[1].tls.credentialName}'
+echo ""
+
+echo | openssl s_client -connect 172.20.43.253:443 -servername t1abbottlinkuser.products.abbott 2>&1 | head -20
+
+kubectl logs deploy/gateway -n istio-system --tail=50 | grep -i -E "error|warn|tls|secret|cert"
+
+kubectl rollout restart deploy/istiod -n istio-system
+
+
+# Check if istiod now sees the secret
+kubectl logs deploy/istiod -n istio-system --tail=50 | grep -i "twx-ingress"
+
+# Test again
+curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://172.20.43.253/Thingworx -H "Host: t1abbottlinkuser.products.abbott"
+
+
+kubectl get secret twx-ingress-tl-cert -n istio-system -o jsonpath='{range .data}{@}{"\n"}{end}' | head -1 > /dev/null && echo "has data"
+kubectl get secret twx-ingress-tl-cert -n istio-system -o json | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print('\n'.join(d.keys()))"
