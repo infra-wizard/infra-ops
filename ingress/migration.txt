@@ -6,6 +6,13 @@ curl -s -o /dev/null -w "HTTP: %{http_code}\n" http://172.20.43.253/ -H "Host: t
 # HTTPS
 curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://172.20.43.253/ -H "Host: t1abbottlinkuser.products.abbott"
 
+
+kubectl exec deploy/gateway -n istio-system -- pilot-agent request GET listeners 2>&1 | grep -E "0.0.0.0:(80|443)"
+
+kubectl get secret dxu-aks-tls -n istio-system -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -dates 2>&1
+
+kubectl logs deploy/istiod -n istio-system --tail=100 | grep -i -E "error|warn|fail|dxu|secret" | tail -10
+
 > Complete walkthrough including common errors and fixes.
 
 ---
