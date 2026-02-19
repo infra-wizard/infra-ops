@@ -3,13 +3,17 @@ name: Github Migration
 on:
   workflow_dispatch:
     inputs:
-      repo_names:
-        description: 'Repository names (one per line or comma-separated)'
+      input_method:
+        description: 'How do you want to provide repo names?'
         required: true
+        type: choice
+        options:
+          - 'manual - enter repo names below'
+          - 'file - use repos-list.txt from repo'
+      repo_names:
+        description: 'Repo names (comma or newline separated) — only used if method is manual'
+        required: false
         type: string
-  push:
-    branches:
-      - gh-migration
 
 jobs:
   repo-migration:
@@ -22,14 +26,33 @@ jobs:
           fetch-depth: 0
           fetch-tags: 'true'
 
-      - name: Generate repos.txt from input
+      - name: Generate repos.txt from manual input
+        if: ${{ startsWith(github.event.inputs.input_method, 'manual') }}
         shell: pwsh
         run: |
-          $input = "${{ github.event.inputs.repo_names }}"
-          # Support both comma-separated and newline-separated input
+          $input = @"
+          ${{ github.event.inputs.repo_names }}
+          "@
           $repos = $input -split '[,\n]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+          if ($repos.Count -eq 0) {
+            Write-Error "No repo names provided. Please enter repo names in the 'repo_names' input."
+            exit 1
+          }
           $repos | Set-Content -Path "scripts/repos.txt"
           Write-Host "Generated repos.txt with $($repos.Count) repositories:"
+          $repos | ForEach-Object { Write-Host "  - $_" }
+
+      - name: Use repos-list.txt from repository
+        if: ${{ startsWith(github.event.inputs.input_method, 'file') }}
+        shell: pwsh
+        run: |
+          if (-Not (Test-Path "scripts/repos-list.txt")) {
+            Write-Error "scripts/repos-list.txt not found in the repository. Please create it and push before running."
+            exit 1
+          }
+          Copy-Item "scripts/repos-list.txt" -Destination "scripts/repos.txt"
+          $repos = Get-Content "scripts/repos.txt" | Where-Object { $_.Trim() -ne "" }
+          Write-Host "Loaded $($repos.Count) repositories from repos-list.txt:"
           $repos | ForEach-Object { Write-Host "  - $_" }
 
       - name: Run PowerShell
@@ -41,4 +64,3 @@ jobs:
           cd scripts
           $env:GH_SOURCE_PAT
           $env:GH_PAT
-          .\migrate-repos.ps1 -SourceOrg "Trail-Tech" -TargetOrg "Polaris-InVehicleSoftware" -RepoListFile "repos.txt"
