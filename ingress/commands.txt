@@ -17,3 +17,13 @@ curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" https://172.20.43.253/Thingworx
 
 kubectl get secret twx-ingress-tl-cert -n istio-system -o jsonpath='{range .data}{@}{"\n"}{end}' | head -1 > /dev/null && echo "has data"
 kubectl get secret twx-ingress-tl-cert -n istio-system -o json | python3 -c "import sys,json; d=json.load(sys.stdin)['data']; print('\n'.join(d.keys()))"
+
+curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" \
+  --resolve t1abbottlinkuser.products.abbott:443:172.20.43.253 \
+  https://t1abbottlinkuser.products.abbott/
+
+curl -sk -o /dev/null -w "HTTPS: %{http_code}\n" \
+  --resolve t1abbottlinkdevice.products.abbott:443:172.20.43.253 \
+  https://t1abbottlinkdevice.products.abbott/
+
+
