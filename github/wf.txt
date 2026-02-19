@@ -1,0 +1,44 @@
+name: Github Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_names:
+        description: 'Repository names (one per line or comma-separated)'
+        required: true
+        type: string
+  push:
+    branches:
+      - gh-migration
+
+jobs:
+  repo-migration:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: 'true'
+
+      - name: Generate repos.txt from input
+        shell: pwsh
+        run: |
+          $input = "${{ github.event.inputs.repo_names }}"
+          # Support both comma-separated and newline-separated input
+          $repos = $input -split '[,\n]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
+          $repos | Set-Content -Path "scripts/repos.txt"
+          Write-Host "Generated repos.txt with $($repos.Count) repositories:"
+          $repos | ForEach-Object { Write-Host "  - $_" }
+
+      - name: Run PowerShell
+        shell: pwsh
+        env:
+          GH_SOURCE_PAT: ${{ secrets.SOURCE_PAT }}
+          GH_PAT: ${{ secrets.TARGET_PAT }}
+        run: |
+          cd scripts
+          $env:GH_SOURCE_PAT
+          $env:GH_PAT
+          .\migrate-repos.ps1 -SourceOrg "Trail-Tech" -TargetOrg "Polaris-InVehicleSoftware" -RepoListFile "repos.txt"
