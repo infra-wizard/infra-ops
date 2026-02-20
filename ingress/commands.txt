@@ -1,10 +1,17 @@
+# Inside the pod
 keytool -importkeystore \
   -srckeystore /opt/apache-tomcat/conf/abtapps \
   -srcstoretype JKS \
   -srcstorepass changeit \
+  -srcalias abtapps \
   -destkeystore /opt/apache-tomcat/conf/abtapps.p12 \
   -deststoretype PKCS12 \
-  -deststorepass changeit
+  -deststorepass changeit \
+  -destalias abtapps
+
+# Verify conversion
+keytool -list -keystore /opt/apache-tomcat/conf/abtapps.p12 \
+  -storetype PKCS12 -storepass changeit
 
 
 kubectl get gateway twx-gateway -n twx -o jsonpath='{.spec.servers[1].tls.credentialName}'
