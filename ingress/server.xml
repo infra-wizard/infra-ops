@@ -1,0 +1,8 @@
+<Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol"
+           maxThreads="150" SSLEnabled="true" scheme="https" secure="true">
+    <SSLHostConfig>
+        <Certificate certificateKeystoreFile="/opt/apache-tomcat/conf/abtapps"
+                     certificateKeystorePassword="changeit"
+                     type="RSA" />
+    </SSLHostConfig>
+</Connector>
