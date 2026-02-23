@@ -1,0 +1,29 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: bookinfo-gateway
+  namespace: default
+spec:
+  selector:
+    istio: gateway
+  servers:
+    # Server 1: HTTP
+    - hosts:
+        - tlabbottlinkuser.products.abbott
+      port:
+        name: http
+        number: 80
+        protocol: HTTP
+      tls:
+        httpsRedirect: true   # optional: redirect HTTP → HTTPS
+
+    # Server 2: HTTPS
+    - hosts:
+        - tlabbottlinkuser.products.abbott
+      port:
+        name: https
+        number: 443
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: dxu-aks-tls
