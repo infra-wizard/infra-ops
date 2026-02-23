@@ -1,3 +1,25 @@
+echo "=== 1. Secret Type ==="
+kubectl get secret dxu-aks-tls -n istio-system -o jsonpath='{.type}'
+echo ""
+
+echo "=== 2. Secret Data Keys ==="
+kubectl get secret dxu-aks-tls -n istio-system -o jsonpath='{range .data}{@}{"\n"}{end}' > /dev/null 2>&1 && \
+kubectl get secret dxu-aks-tls -n istio-system -o json | python3 -c "import sys,json; d=json.load(sys.stdin); print('Keys:', list(d['data'].keys()))"
+
+echo "=== 3. Gateway credentialName ==="
+kubectl get gateway -A -o yaml | grep -A2 credentialName
+
+echo "=== 4. Gateway pod namespace ==="
+kubectl get pods -A -l istio=gateway -o custom-columns="NAMESPACE:.metadata.namespace,NAME:.metadata.name,IP:.status.podIP"
+
+echo "=== 5. istiod RBAC ==="
+kubectl auth can-i get secrets -n istio-system --as=system:serviceaccount:istio-system:istiod
+
+echo "=== 6. Cert validity ==="
+kubectl get secret dxu-aks-tls -n istio-system -o jsonpath='{.data.tls\.crt}' | base64 -d | openssl x509 -noout -subject -dates 2>&1
+
+
+
 kubectl auth can-i get secrets -n istio-system --as=system:serviceaccount:istio-system:istiod
 
 # Inside the pod
