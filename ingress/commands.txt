@@ -1,3 +1,5 @@
+kubectl auth can-i get secrets -n istio-system --as=system:serviceaccount:istio-system:istiod
+
 # Inside the pod
 keytool -importkeystore \
   -srckeystore /opt/apache-tomcat/conf/abtapps \
