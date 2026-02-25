@@ -1,0 +1,1 @@
+I have deployed the Istio configuration, including a VirtualService to manage traffic routing and a DestinationRule to define post-routing behavior. Additionally, I have configured an Istio Gateway to expose the service externally. However, when attempting to access the application, it is unreachable and the browser reports 'site can't be reached'
