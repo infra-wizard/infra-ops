@@ -1,1 +1,31 @@
-I have deployed the Istio configuration, including a VirtualService to manage traffic routing and a DestinationRule to define post-routing behavior. Additionally, I have configured an Istio Gateway to expose the service externally. However, when attempting to access the application, it is unreachable and the browser reports 'site can't be reached'
+- name: Checkout kepler-helm
+        uses: actions/checkout@v4
+        with:
+          repository: Appen-International/kepler-helm
+          token: ${{ secrets.ACTION_TOKEN }}
+          ref: ${{ env.PROFILE }}
+          path: ./kepler-helm
+
+      - name: Change and Push kepler-helm
+        run: |
+          cd ./kepler-helm/app
+          git config user.name "${{ env.COMMITTER }}"
+          git config user.email "${{ env.COMMITTER_EMAIL }}"
+          IFS="," read -a services <<< ${{ env.SERVICE_ARRAY_AS_STRING }}
+          for service in "${services[@]}"; do
+            if [ -d ${service} ]; then
+              cd ${service}
+              yq -i ".image.tag=\"$IMAGE_TAG\"" values.yaml
+              cd ..
+            fi
+          done
+          cd ..
+          git add .
+          staged=`git diff --staged`
+          if [[ -n $staged ]]
+          then
+            git commit -am "Pushing change to helm `date`"
+            git push -u origin ${{ env.PROFILE }}
+          else
+            echo "No changes detected, not gonna do deployment..."
+          fi
