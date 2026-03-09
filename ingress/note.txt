@@ -1,31 +1,11 @@
-- name: Checkout kepler-helm
-        uses: actions/checkout@v4
-        with:
-          repository: Appen-International/kepler-helm
-          token: ${{ secrets.ACTION_TOKEN }}
-          ref: ${{ env.PROFILE }}
-          path: ./kepler-helm
-
-      - name: Change and Push kepler-helm
-        run: |
-          cd ./kepler-helm/app
-          git config user.name "${{ env.COMMITTER }}"
-          git config user.email "${{ env.COMMITTER_EMAIL }}"
-          IFS="," read -a services <<< ${{ env.SERVICE_ARRAY_AS_STRING }}
-          for service in "${services[@]}"; do
-            if [ -d ${service} ]; then
-              cd ${service}
-              yq -i ".image.tag=\"$IMAGE_TAG\"" values.yaml
-              cd ..
-            fi
-          done
-          cd ..
-          git add .
-          staged=`git diff --staged`
-          if [[ -n $staged ]]
-          then
-            git commit -am "Pushing change to helm `date`"
-            git push -u origin ${{ env.PROFILE }}
-          else
-            echo "No changes detected, not gonna do deployment..."
-          fi
+- name: Create new branch
+      run: |
+        BRANCH_NAME=$(date +"V%Y-%m-%d")
+        git checkout -b $BRANCH_NAME
+        git config --global user.email "${{ github.event.pusher.email }}"
+        git config --global user.name "${{ github.triggering_actor }}"
+        sed -i 's/tag: .*/tag: "${{ github.event.inputs.docker_tag }}"/' app/*/values.yaml
+        git add *
+        git commit -m "updating values"
+        git push origin $BRANCH_NAME
+        gh pr create --base main --head $BRANCH_NAME --title "$BRANCH_NAME" --body "QF Prod Deploy"
