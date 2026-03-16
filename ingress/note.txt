@@ -1,3 +1,13 @@
+while read -r TAR_FILE REPOSITORY TAG; do
+
+    [[ -z "$TAR_FILE" || "$TAR_FILE" == \#* ]] && continue
+
+    # load → tag → push logic...
+
+done < "$IMAGES_LIST"
+
+
+
 LOAD_OUTPUT=$(docker load --input "$TAR_PATH" 2>&1)
 log_info "  $LOAD_OUTPUT"
 
