@@ -1,34 +1,9 @@
-- name: Create new branch
-      run: |
-        BRANCH_NAME=$(date +"V%Y-%m-%d")
-        git checkout -b $BRANCH_NAME
-        git config --global user.email "${{ github.event.pusher.email }}"
-        git config --global user.name "${{ github.triggering_actor }}"
-        sed -i 's/tag: .*/tag: "${{ github.event.inputs.docker_tag }}"/' app/*/values.yaml
-        git add *
-        git commit -m "updating values"
-        git push origin $BRANCH_NAME
-        gh pr create --base main --head $BRANCH_NAME --title "$BRANCH_NAME" --body "QF Prod Deploy"
+LOAD_OUTPUT=$(docker load --input "$TAR_PATH" 2>&1)
+log_info "  $LOAD_OUTPUT"
 
-
-
-
-# For Linux x86_64
-curl -L https://github.com/cli/cli/releases/download/v2.67.0/gh_2.67.0_linux_amd64.tar.gz -o gh.tar.gz
-
-scp gh.tar.gz user@your-runner:/tmp/
-
-
-cd /tmp
-tar -xzf gh.tar.gz
-
-# Install to /usr/local/bin (system-wide, no package manager needed)
-sudo mv gh_2.67.0_linux_amd64/bin/gh /usr/local/bin/gh
-sudo chmod +x /usr/local/bin/gh
-
-# Optional: install man pages
-sudo mkdir -p /usr/local/share/man/man1
-sudo cp gh_2.67.0_linux_amd64/share/man/man1/* /usr/local/share/man/man1/
-
-gh --version
-# gh version 2.67.0 (2025-01-27)
+LOADED_IMAGE=$(echo "$LOAD_OUTPUT" | grep -oP '(?<=Loaded image: )\S+' | head -1)
+ 
+if [[ -z "$LOADED_IMAGE" ]]; then
+      LOADED_IMAGE="${REPOSITORY}:${TAG}"
+      log_warn "  Could not auto-detect image name; using: $LOADED_IMAGE"
+fi
