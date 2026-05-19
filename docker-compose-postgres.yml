@@ -1,0 +1,161 @@
+version: '2.2'
+
+volumes:
+  storage:
+
+services:
+  postgresql:
+    platform: linux/amd64
+    image: postgres:latest
+    ports:
+      - "5432"
+    healthcheck:
+      test: pg_isready -U ${POSTGRES_USER}
+      interval: 15s
+    environment:
+      # NOTE: Set POSTGRES_USER, POSTGRES_PASSWORD POSTGRES_DB for connecting
+      # to the postgres as super user
+      - "POSTGRES_USER=${POSTGRES_USER}"
+      - "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
+      - "POSTGRES_DB=${POSTGRES_DB}"
+
+  postgresql-init:
+    platform: linux/amd64
+    image: thingworx/postgresql-init-twx:latest
+    entrypoint: bash -c -x "/usr/local/bin/db-check.sh && /usr/local/bin/db-setup.sh && sleep infinity"
+    healthcheck:
+      test: [ "CMD-SHELL", "grep 'success' tmp/status.txt || exit 1" ]
+      interval: 15s
+      retries: 5
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      # NOTE: Set DATABASE_ADMIN_USERNAME, DATABASE_ADMIN_PASSWORD DATABASE_ADMIN_SCHEMA for connecting
+      # to the postgres as super user
+      - "DATABASE_ADMIN_USERNAME=${POSTGRES_USER}"
+      - "DATABASE_ADMIN_PASSWORD=${POSTGRES_PASSWORD}"
+      - "DATABASE_ADMIN_SCHEMA=${POSTGRES_DB}"
+      - "DATABASE_HOST=postgresql"
+      - "DATABASE_PORT=5432"
+      - "TWX_DATABASE_USERNAME=${TWX_DATABASE_USERNAME}"
+      - "TWX_DATABASE_SCHEMA=${TWX_DATABASE_SCHEMA}"
+      - "TWX_DATABASE_PASSWORD=${TWX_DATABASE_PASSWORD}"
+
+  security-cli:
+    platform: linux/amd64
+    image: thingworx/security-tool:latest
+    entrypoint: sh -c "/opt/docker-entrypoint.sh && sleep infinity"
+    healthcheck:
+      test: [ "CMD-SHELL", "grep 'success' status.txt || exit 1" ]
+      interval: 15s
+      retries: 5
+    environment:
+      KEYSTORE: 'true'
+      # NOTE: Set KEYSTORE_PASSWORD (Must match value from platform container)
+      KEYSTORE_PASSWORD: ${KEYSTORE_PASSWORD}
+      KEYSTORE_PASSWORD_FILE_PATH: '/opt'
+      KEYSTORE_FILE_PATH: '/ThingworxStorage'
+      CUSTOM_SECRET_LIST: 'encrypt.db.password:TWX_DATABASE_PASSWORD,encrypt.event.hub.root.connection.string:EVENT_HUBS_QUEUE_PROVIDER_ROOT_CONNECTION_STRING'
+      EVENT_HUBS_QUEUE_PROVIDER_ROOT_CONNECTION_STRING: 
+      # NOTE: Set TWX_DATABASE_PASSWORD
+      TWX_DATABASE_PASSWORD: ${TWX_DATABASE_PASSWORD}
+      # NOTE: Set SECRET_PROVISIONING_APP_KEY to any GUID (Must match value from platform container)
+      SECRET_PROVISIONING_APP_KEY: ${SECRET_PROVISIONING_APP_KEY}
+    volumes:
+      - storage:/ThingworxStorage
+
+  platform:
+    platform: linux/amd64
+    image: thingworx/platform-postgres:latest
+    healthcheck:
+      test: curl -f localhost:8080/Thingworx/health
+      interval: 15s
+    depends_on:
+      security-cli:
+        condition: service_healthy
+      postgresql-init:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      - "CATALINA_OPTS=-Xms2g -Xmx4g"
+      # NOTE: Set KEYSTORE_PASSWORD (Must match value from security-cli container)
+      - "KEYSTORE_PASSWORD=${KEYSTORE_PASSWORD}"
+      # NOTE: Set SECRET_PROVISIONING_APP_KEY to any GUID (Must match value from security-cli container)
+      - "SECRET_PROVISIONING_APP_KEY=${SECRET_PROVISIONING_APP_KEY}"
+      - "DATABASE_HOST=postgresql"
+      - "DATABASE_PORT=5432"
+      - "TWX_DATABASE_USERNAME=${TWX_DATABASE_USERNAME}"
+      - "TWX_DATABASE_SCHEMA=${TWX_DATABASE_SCHEMA}"
+      # NOTE: The following must be set for the Platform to start. This will be
+      # the initial Administrator password.
+      - "THINGWORX_INITIAL_ADMIN_PASSWORD=${THINGWORX_INITIAL_ADMIN_PASSWORD}"
+      # NOTE: The following must be set for the Platform to start. This will be
+      # the initial MetricsUser password.
+      - "THINGWORX_INITIAL_METRICS_USER_PASSWORD=${THINGWORX_INITIAL_METRICS_USER_PASSWORD}"
+      #Uncomment the below to automatically download license
+      #- "LS_USERNAME=${PTCUSERNAME}"
+      #- "LS_PASSWORD=${PTCPASSWORD}"
+      - "ENABLE_CONTENT_SECURITY_POLICY_FILTER=false"
+      - "MASHUP_WEBSOCKET_CONNECTION_ALIVE_AFTER_TIMEOUT=false"
+      - "THING_START_MAX_WAIT_TIME=0"
+      - "DISABLE_METRICS_WRITING_TO_APPLICATIONLOG=false"
+      - "DISABLE_FILE_LOGGING=false"
+      - "ENABLE_PROP_WRITE_INFO_LEVEL_LOGS="
+      - "ENABLE_DATA_ORDERING=false"
+      - "DISABLED_METRICS_LIST="
+      - "HISTOGRAM_BUCKET_SIZE_LIST="
+      # File transfer configuration
+      - "FILE_SIZE_THRESHOLD=200"
+      - "LRU_CHECKSUM_CACHE_MAX_SIZE=100000"
+      # Durable Queues Settings
+      - "ENABLE_DURABLE_EVENTS=false"
+      - "ENABLE_DURABLE_PERSISTENT_PROPERTIES=false"
+      - "ENABLE_DURABLE_LOGGED_PROPERTIES=false"
+      - "INTERNAL_QUEUE_PROVIDER_PACKAGE=KafkaQueueProviderPackage"
+      - "PERSISTENT_PROPERTY_TOPIC_PARTITIONS="
+      - "UNORDERED_EVENTS_TOPIC_PARTITIONS="
+      - "LOGGED_PROPERTIES_TOPIC_PARTITIONS="
+      - "MAXIMUM_CACHED_DATA_FOR_DURABLE_PERSISTENT_PROPERTIES="
+      - "MAXIMUM_CACHED_DATA_FOR_DURABLE_LOGGED_PROPERTIES="
+      - "UNORDERED_EVENT_PRODUCER_MAX_REQUEST_SIZE="
+      - "UNORDERED_EVENT_PRODUCER_LINGER_MS="
+      - "UNORDERED_EVENT_PRODUCER_BATCH_SIZE="
+      - "UNORDERED_EVENT_PRODUCER_RETRIES="
+      - "LOGGED_PROPERTY_PRODUCER_RETRIES="
+      - "LOGGED_PROPERTY_PRODUCER_BATCH_SIZE="
+      - "LOGGED_PROPERTY_PRODUCER_LINGER_MS="
+      - "LOGGED_PROPERTY_PRODUCER_MAX_REQUEST_SIZE="
+      - "PERSISTENT_PROPERTY_PRODUCER_RETRIES="
+      - "PERSISTENT_PROPERTY_PRODUCER_BATCH_SIZE="
+      - "PERSISTENT_PROPERTY_PRODUCER_LINGER_MS="
+      - "PERSISTENT_PROPERTY_PRODUCER_MAX_REQUEST_SIZE="
+      - "LOGGED_PROPERTY_ALLOW_DATA_LOSS_FOR_LAG_CONTROL="
+      # Durable Queues EventHub Settings
+      - "EVENT_HUBS_QUEUE_PROVIDER_NAMESPACE_NAME="
+      #----------------------------------------------------------
+      #Consolidated Audit
+      #----------------------------------------------------------
+      - "CONSOLIDATED_FILE_TRANSFER_AUDIT_ENABLED=false"
+      - "SOURCE_ASSIGNMENT_FOR_CONSOLIDATED_FILE_TRANSFER_AUDIT="
+       # EXTPKG defines import permissions
+      - "EXTPKG_IMPORT_POLICY_ENABLED=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_JARRES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_JSRES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_CSSRES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_JSONRES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_WEBAPPRES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_ENTITIES=false"
+      - "EXTPKG_IMPORT_POLICY_ALLOW_EXTENTITIES=false"
+      - "EXTPKG_IMPORT_POLICY_HA_COMPATIBILITY_LEVEL=WARN"
+
+
+    # Use this to mount your orgs licence file, if not ThingWorx will fallback to temporary licence
+    volumes:
+      - storage:/ThingworxStorage
+    #  - ./license.bin:/ThingworxPlatform/license.bin
+    # # To enable SSL encryption for Kafka clients, uncomment the following lines. This will mount the client SSL certificates.
+    # - ./ClientKeystore.jks:/var/private/ssl/keystore/ClientKeystore.jks
+    # - ./ClientTruststore.jks:/var/private/ssl/truststore/ClientTruststore.jks    
