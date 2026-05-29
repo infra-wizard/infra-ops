@@ -11,6 +11,7 @@ The script wakes up every SCAN_INTERVAL_HOURS, reads the xlsx/csv,
 checks every DATE_COLUMN for expiry, and sends an SMTP HTML email.
 """
 
+import base64
 import io
 import logging
 import os
@@ -81,23 +82,61 @@ IDENTITY_COLUMNS = [
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
+def _get_raw_bytes(filepath: str) -> bytes:
+    """
+    Read file bytes from disk.
+    When a binary file (xlsx) is stored in a Kubernetes ConfigMap via
+    `kubectl create configmap --from-file=`, it is base64-encoded internally
+    but Kubernetes decodes it back to raw bytes on volume mount.
+    However, if the ConfigMap was created from a text representation or the
+    file got corrupted, we attempt base64 decoding as a fallback.
+    """
+    raw = Path(filepath).read_bytes()
+
+    # Check for xlsx magic bytes: PK\x03\x04 (ZIP format)
+    if raw[:4] == b'PK\x03\x04':
+        log.info("File has valid xlsx/ZIP magic bytes — using as-is.")
+        return raw
+
+    # If magic bytes missing, the bytes on disk may be base64-encoded text
+    log.warning("xlsx magic bytes not found — attempting base64 decode.")
+    try:
+        decoded = base64.b64decode(raw.strip())
+        if decoded[:4] == b'PK\x03\x04':
+            log.info("Base64 decode succeeded — valid xlsx detected.")
+            return decoded
+    except Exception:
+        pass
+
+    # Last resort: return raw and let pandas fail with a clear message
+    log.warning("Base64 decode did not produce valid xlsx. Returning raw bytes.")
+    return raw
+
+
 def load_file(filepath: str) -> pd.DataFrame:
     """
-    Load xlsx/csv from the ConfigMap-mounted path.
-    Kubernetes mounts ConfigMap binary data as raw bytes on disk,
-    so we read via pathlib and pass bytes to pandas — this avoids
-    any file-encoding issues with binary xlsx content.
+    Load xlsx/csv mounted from a Kubernetes ConfigMap volume.
+    Explicitly sets engine='openpyxl' to avoid the
+    'Excel file format cannot be determined' error.
     """
     p = Path(filepath)
     if not p.exists():
-        raise FileNotFoundError(f"Data file not found at {filepath}. "
-                                "Check the ConfigMap volume mount.")
+        raise FileNotFoundError(
+            f"Data file not found at {filepath}. "
+            "Verify the ConfigMap volume mount and the 'items.key' in deployment.yaml."
+        )
 
-    raw = p.read_bytes()
     ext = p.suffix.lower()
 
-    if ext in (".xlsx", ".xlsm", ".xls"):
-        sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None, dtype=str)
+    if ext in (".xlsx", ".xlsm"):
+        raw = _get_raw_bytes(filepath)
+        # Always specify engine explicitly — avoids format-detection errors
+        sheets = pd.read_excel(
+            io.BytesIO(raw),
+            sheet_name=None,
+            dtype=str,
+            engine="openpyxl",        # ← key fix
+        )
         frames = []
         for name, df in sheets.items():
             df["_sheet"] = name
@@ -107,7 +146,22 @@ def load_file(filepath: str) -> pd.DataFrame:
                  len(combined), len(sheets), filepath)
         return combined
 
+    elif ext == ".xls":
+        raw = _get_raw_bytes(filepath)
+        sheets = pd.read_excel(
+            io.BytesIO(raw),
+            sheet_name=None,
+            dtype=str,
+            engine="xlrd",            # legacy .xls format
+        )
+        frames = [df.assign(_sheet=name) for name, df in sheets.items()]
+        combined = pd.concat(frames, ignore_index=True)
+        log.info("Loaded %d row(s) from %d sheet(s) in %s",
+                 len(combined), len(sheets), filepath)
+        return combined
+
     elif ext == ".csv":
+        raw = Path(filepath).read_bytes()
         df = pd.read_csv(io.BytesIO(raw), dtype=str)
         log.info("Loaded %d row(s) from %s", len(df), filepath)
         return df
