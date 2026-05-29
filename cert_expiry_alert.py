@@ -3,15 +3,15 @@ cert_expiry_alert.py
 --------------------
 Runs continuously inside an AKS pod.
 Configuration is injected via:
-  - ConfigMap  "cert-monitor-config"  → environment variables (SMTP, schedule, columns)
-  - ConfigMap  "cert-data-file"       → volume-mounted file at /data/certs.xlsx
-  - Secret     "cert-monitor-secret"  → SMTP_PASSWORD
+  - ConfigMap "cert-monitor-config" → environment variables
+  - ConfigMap "cert-data-file"      → volume-mounted CSV at /data/certs.csv
+  - Secret    "cert-monitor-secret" → SMTP_PASSWORD
 
-The script wakes up every SCAN_INTERVAL_HOURS, reads the xlsx/csv,
-checks every DATE_COLUMN for expiry, and sends an SMTP HTML email.
+NOTE: Store data as CSV in the ConfigMap (not xlsx).
+      Kubernetes ConfigMaps corrupt binary xlsx files.
+      Use convert_xlsx_to_csv.py locally to convert first.
 """
 
-import base64
 import io
 import logging
 import os
@@ -36,7 +36,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# ── Config from environment variables (injected by ConfigMap + Secret) ────────
+# ── Config from environment variables ────────────────────────────────────────
 
 def _env(key, default=None, required=False):
     val = os.environ.get(key, default)
@@ -46,129 +46,80 @@ def _env(key, default=None, required=False):
     return val
 
 
-# File path (ConfigMap volume-mounted xlsx/csv)
-DATA_FILE            = _env("DATA_FILE", "/data/certs.xlsx", required=True)
+DATA_FILE           = _env("DATA_FILE", "/data/certs.csv", required=True)
+SMTP_HOST           = _env("SMTP_HOST", required=True)
+SMTP_PORT           = int(_env("SMTP_PORT", "587"))
+SMTP_USER           = _env("SMTP_USER", required=True)
+SMTP_PASSWORD       = _env("SMTP_PASSWORD", required=True)
+SMTP_USE_TLS        = _env("SMTP_USE_TLS", "true").lower() == "true"
+ALERT_RECIPIENTS    = [e.strip() for e in _env("ALERT_RECIPIENTS", required=True).split(",")]
+WARN_DAYS           = int(_env("WARN_DAYS", "30"))
+SCAN_INTERVAL_HOURS = float(_env("SCAN_INTERVAL_HOURS", "24"))
 
-# SMTP
-SMTP_HOST            = _env("SMTP_HOST", required=True)
-SMTP_PORT            = int(_env("SMTP_PORT", "587"))
-SMTP_USER            = _env("SMTP_USER", required=True)
-SMTP_PASSWORD        = _env("SMTP_PASSWORD", required=True)   # from Secret
-SMTP_USE_TLS         = _env("SMTP_USE_TLS", "true").lower() == "true"
+DATE_COLUMNS = [c.strip() for c in _env(
+    "DATE_COLUMNS",
+    "Ingress-cert,SSO-cert,AKS Version- End of life,"
+    "PTC License,ProvisioningKe,emessagekey,TWX_AppKey",
+).split(",")]
 
-# Recipients
-ALERT_RECIPIENTS     = [e.strip() for e in _env("ALERT_RECIPIENTS", required=True).split(",")]
-
-# Alert window & scan cadence
-WARN_DAYS            = int(_env("WARN_DAYS", "30"))
-SCAN_INTERVAL_HOURS  = float(_env("SCAN_INTERVAL_HOURS", "24"))
-
-# Columns (comma-separated, must match spreadsheet headers exactly)
-DATE_COLUMNS = [
-    c.strip() for c in _env(
-        "DATE_COLUMNS",
-        "Ingress-cert,SSO-cert,AKS Version- End of life,"
-        "PTC License,ProvisioningKe,emessagekey,TWX_AppKey",
-    ).split(",")
-]
-
-IDENTITY_COLUMNS = [
-    c.strip() for c in _env(
-        "IDENTITY_COLUMNS",
-        "TWX_AppKey,Azure AD -Client ID,Logtools B2C- Client ID",
-    ).split(",")
-]
+IDENTITY_COLUMNS = [c.strip() for c in _env(
+    "IDENTITY_COLUMNS",
+    "TWX_AppKey,Azure AD -Client ID,Logtools B2C- Client ID",
+).split(",")]
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def _get_raw_bytes(filepath: str) -> bytes:
-    """
-    Read file bytes from disk.
-    When a binary file (xlsx) is stored in a Kubernetes ConfigMap via
-    `kubectl create configmap --from-file=`, it is base64-encoded internally
-    but Kubernetes decodes it back to raw bytes on volume mount.
-    However, if the ConfigMap was created from a text representation or the
-    file got corrupted, we attempt base64 decoding as a fallback.
-    """
-    raw = Path(filepath).read_bytes()
-
-    # Check for xlsx magic bytes: PK\x03\x04 (ZIP format)
-    if raw[:4] == b'PK\x03\x04':
-        log.info("File has valid xlsx/ZIP magic bytes — using as-is.")
-        return raw
-
-    # If magic bytes missing, the bytes on disk may be base64-encoded text
-    log.warning("xlsx magic bytes not found — attempting base64 decode.")
-    try:
-        decoded = base64.b64decode(raw.strip())
-        if decoded[:4] == b'PK\x03\x04':
-            log.info("Base64 decode succeeded — valid xlsx detected.")
-            return decoded
-    except Exception:
-        pass
-
-    # Last resort: return raw and let pandas fail with a clear message
-    log.warning("Base64 decode did not produce valid xlsx. Returning raw bytes.")
-    return raw
-
-
 def load_file(filepath: str) -> pd.DataFrame:
-    """
-    Load xlsx/csv mounted from a Kubernetes ConfigMap volume.
-    Explicitly sets engine='openpyxl' to avoid the
-    'Excel file format cannot be determined' error.
-    """
     p = Path(filepath)
     if not p.exists():
         raise FileNotFoundError(
-            f"Data file not found at {filepath}. "
-            "Verify the ConfigMap volume mount and the 'items.key' in deployment.yaml."
+            f"Data file not found: {filepath}\n"
+            "  • Check the ConfigMap volume mount in deployment.yaml\n"
+            "  • Verify DATA_FILE env var matches the mounted filename\n"
+            "  • Run: kubectl exec <pod> -- ls -la /data/"
         )
 
-    ext = p.suffix.lower()
+    ext  = p.suffix.lower()
+    size = p.stat().st_size
+    log.info("Reading %s  (%.1f KB, type=%s)", filepath, size / 1024, ext)
 
-    if ext in (".xlsx", ".xlsm"):
-        raw = _get_raw_bytes(filepath)
-        # Always specify engine explicitly — avoids format-detection errors
-        sheets = pd.read_excel(
-            io.BytesIO(raw),
-            sheet_name=None,
-            dtype=str,
-            engine="openpyxl",        # ← key fix
-        )
-        frames = []
-        for name, df in sheets.items():
-            df["_sheet"] = name
-            frames.append(df)
-        combined = pd.concat(frames, ignore_index=True)
-        log.info("Loaded %d row(s) from %d sheet(s) in %s",
-                 len(combined), len(sheets), filepath)
-        return combined
-
-    elif ext == ".xls":
-        raw = _get_raw_bytes(filepath)
-        sheets = pd.read_excel(
-            io.BytesIO(raw),
-            sheet_name=None,
-            dtype=str,
-            engine="xlrd",            # legacy .xls format
-        )
-        frames = [df.assign(_sheet=name) for name, df in sheets.items()]
-        combined = pd.concat(frames, ignore_index=True)
-        log.info("Loaded %d row(s) from %d sheet(s) in %s",
-                 len(combined), len(sheets), filepath)
-        return combined
-
-    elif ext == ".csv":
-        raw = Path(filepath).read_bytes()
-        df = pd.read_csv(io.BytesIO(raw), dtype=str)
-        log.info("Loaded %d row(s) from %s", len(df), filepath)
+    if ext == ".csv":
+        # CSV is plain text — ConfigMap handles it perfectly
+        text = p.read_text(encoding="utf-8", errors="replace")
+        df   = pd.read_csv(io.StringIO(text), dtype=str)
+        log.info("Loaded %d row(s) from CSV", len(df))
         return df
 
-    else:
-        raise ValueError(f"Unsupported file extension '{ext}'. Use .xlsx or .csv")
+    elif ext in (".xlsx", ".xlsm", ".xls"):
+        # Binary xlsx should NOT be stored in a ConfigMap.
+        # If someone mounts one anyway, try to read it but warn loudly.
+        log.warning(
+            "xlsx detected in ConfigMap mount — binary files are likely corrupted.\n"
+            "  → Run convert_xlsx_to_csv.py locally and recreate the ConfigMap with a CSV."
+        )
+        raw = p.read_bytes()
+        if raw[:4] != b'PK\x03\x04':
+            raise ValueError(
+                "xlsx magic bytes missing — file is corrupted by ConfigMap encoding.\n"
+                "FIX: convert to CSV first:\n"
+                "  python convert_xlsx_to_csv.py certs.xlsx\n"
+                "  kubectl create configmap cert-data-file --from-file=certs.csv "
+                "--dry-run=client -o yaml | kubectl apply -f -\n"
+                "  kubectl rollout restart deployment/cert-expiry-monitor"
+            )
+        sheets = pd.read_excel(io.BytesIO(raw), sheet_name=None,
+                               dtype=str, engine="openpyxl")
+        frames = [df.assign(_sheet=name) for name, df in sheets.items()]
+        combined = pd.concat(frames, ignore_index=True)
+        log.info("Loaded %d row(s) from %d sheet(s)", len(combined), len(sheets))
+        return combined
 
+    else:
+        raise ValueError(f"Unsupported file type '{ext}'. Use .csv or .xlsx")
+
+
+# ── Date parsing & expiry check ───────────────────────────────────────────────
 
 def parse_dates(df: pd.DataFrame) -> pd.DataFrame:
     for col in DATE_COLUMNS:
@@ -193,9 +144,9 @@ def find_expiring(df: pd.DataFrame) -> list[dict]:
     alerts   = []
 
     existing = [c for c in DATE_COLUMNS if c in df.columns]
-    if not existing:
-        log.warning("None of the configured DATE_COLUMNS found in file. "
-                    "Check column names in ConfigMap: %s", DATE_COLUMNS)
+    missing  = [c for c in DATE_COLUMNS if c not in df.columns]
+    if missing:
+        log.warning("DATE_COLUMNS not found in file (check header names): %s", missing)
 
     for _, row in df.iterrows():
         identity = row_identity(row)
@@ -229,8 +180,7 @@ def _table_rows(items: list[dict]) -> str:
             f"<td>{a['column']}</td>"
             f"<td>{a['expiry_date']}</td>"
             f"<td style='color:{color};font-weight:bold'>"
-            f"  {a['status']} ({a['days_left']}d)"
-            f"</td>"
+            f"{a['status']} ({a['days_left']}d)</td>"
             f"<td>{a['sheet']}</td>"
             f"</tr>"
         )
@@ -245,9 +195,7 @@ def _section(title: str, bg: str, items: list[dict]) -> str:
         f"<table>"
         f"<thead style='background:{bg};color:#fff'>"
         f"<tr><th>Identity</th><th>Field</th><th>Expiry</th><th>Status</th><th>Sheet</th></tr>"
-        f"</thead>"
-        f"<tbody>{_table_rows(items)}</tbody>"
-        f"</table>"
+        f"</thead><tbody>{_table_rows(items)}</tbody></table>"
     )
 
 
@@ -255,10 +203,8 @@ def build_html(alerts: list[dict]) -> str:
     expired  = [a for a in alerts if a["status"] == "EXPIRED"]
     expiring = [a for a in alerts if a["status"] == "EXPIRING SOON"]
     pod      = os.environ.get("HOSTNAME", "unknown")
-    now      = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
 
-    return f"""
-<html><head><style>
+    return f"""<html><head><style>
   body  {{font-family:Arial,sans-serif;color:#222;max-width:980px;margin:auto;padding:20px}}
   h2   {{background:#1a252f;color:#fff;padding:14px 20px;border-radius:6px;margin:0 0 16px}}
   p    {{margin:3px 0;font-size:13px}}
@@ -268,21 +214,18 @@ def build_html(alerts: list[dict]) -> str:
   tr:nth-child(even){{background:#f7f7f7}}
 </style></head><body>
   <h2>🔔 Certificate / License Expiry Alert</h2>
-  <p>Scan time    : <b>{now}</b></p>
-  <p>Source file  : <b>{DATA_FILE}</b></p>
-  <p>Pod          : <b>{pod}</b></p>
-  <p>Warn window  : <b>{WARN_DAYS} days</b></p>
-  <p>Total alerts : <b>{len(alerts)}</b>
-     &nbsp;(🚨 Expired: <b>{len(expired)}</b>
-     &nbsp;⚠️ Expiring soon: <b>{len(expiring)}</b>)</p>
-
+  <p>Scan time   : <b>{datetime.now().strftime('%Y-%m-%d %H:%M UTC')}</b></p>
+  <p>Source file : <b>{DATA_FILE}</b></p>
+  <p>Pod         : <b>{pod}</b></p>
+  <p>Warn window : <b>{WARN_DAYS} days</b></p>
+  <p>Total alerts: <b>{len(alerts)}</b>
+     (🚨 Expired: <b>{len(expired)}</b>
+      ⚠️ Expiring soon: <b>{len(expiring)}</b>)</p>
   {_section('🚨 Already Expired', '#c0392b', expired)}
   {_section(f'⚠️ Expiring Within {WARN_DAYS} Days', '#d35400', expiring)}
-
   <hr style='margin-top:30px'>
   <p style='font-size:11px;color:#aaa'>
-    Auto-generated by cert-expiry-monitor running in AKS pod <b>{pod}</b>.
-    Do not reply to this email.
+    Auto-generated by cert-expiry-monitor | pod: {pod}
   </p>
 </body></html>"""
 
@@ -308,22 +251,22 @@ def send_alert(alerts: list[dict]):
             srv.sendmail(SMTP_USER, ALERT_RECIPIENTS, msg.as_string())
         log.info("✅ Email sent to: %s", ", ".join(ALERT_RECIPIENTS))
     except smtplib.SMTPAuthenticationError:
-        log.error("SMTP authentication failed — check SMTP_USER and SMTP_PASSWORD")
+        log.error("SMTP auth failed — check SMTP_USER / SMTP_PASSWORD")
     except smtplib.SMTPConnectError:
-        log.error("Cannot connect to SMTP server %s:%d", SMTP_HOST, SMTP_PORT)
+        log.error("Cannot connect to %s:%d", SMTP_HOST, SMTP_PORT)
     except Exception as exc:
-        log.exception("Unexpected error sending email: %s", exc)
+        log.exception("Email error: %s", exc)
 
 
 # ── Scan cycle ────────────────────────────────────────────────────────────────
 
 def scan():
-    log.info("── Scan started ── file=%s  warn=%dd", DATA_FILE, WARN_DAYS)
+    log.info("── Scan started — file=%s  warn=%dd", DATA_FILE, WARN_DAYS)
     try:
         df     = load_file(DATA_FILE)
         df     = parse_dates(df)
         alerts = find_expiring(df)
-        log.info("Scan complete — %d alert(s) found", len(alerts))
+        log.info("Scan complete — %d alert(s)", len(alerts))
 
         if alerts:
             for a in alerts:
@@ -332,12 +275,14 @@ def scan():
                             a["expiry_date"], a["days_left"])
             send_alert(alerts)
         else:
-            log.info("No items expiring within %d days — no email sent.", WARN_DAYS)
+            log.info("No items expiring within %d days.", WARN_DAYS)
 
     except FileNotFoundError as exc:
         log.error("%s", exc)
+    except ValueError as exc:
+        log.error("%s", exc)
     except Exception as exc:
-        log.exception("Unhandled error during scan: %s", exc)
+        log.exception("Unhandled scan error: %s", exc)
 
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
@@ -353,9 +298,8 @@ def main():
 
     while True:
         scan()
-        sleep_sec = SCAN_INTERVAL_HOURS * 3600
         log.info("💤 Next scan in %.1f hour(s) …", SCAN_INTERVAL_HOURS)
-        time.sleep(sleep_sec)
+        time.sleep(SCAN_INTERVAL_HOURS * 3600)
 
 
 if __name__ == "__main__":
