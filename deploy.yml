@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cert-expiry-monitor
-  namespace: default                    # change to your namespace
+  namespace: default
   labels:
     app: cert-expiry-monitor
 spec:
-  replicas: 1                           # only 1 replica — avoids duplicate emails
+  replicas: 1
   selector:
     matchLabels:
       app: cert-expiry-monitor
@@ -15,7 +15,6 @@ spec:
       labels:
         app: cert-expiry-monitor
     spec:
-      # ── Security context (run as non-root) ────────────────────────────────
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -23,13 +22,13 @@ spec:
 
       containers:
         - name: cert-monitor
-          image: <YOUR_ACR>.azurecr.io/cert-expiry-monitor:latest   # ← replace
+          image: <YOUR_ACR>.azurecr.io/cert-expiry-monitor:latest
           imagePullPolicy: Always
 
-          # ── Env from settings ConfigMap (SMTP, schedule, columns, etc.) ───
+          # ── All non-secret settings from ConfigMap ────────────────────────
           envFrom:
             - configMapRef:
-                name: cert-monitor-config   # your settings ConfigMap
+                name: cert-monitor-config
 
           # ── SMTP password from Secret ─────────────────────────────────────
           env:
@@ -38,18 +37,16 @@ spec:
                 secretKeyRef:
                   name: cert-monitor-secret
                   key: SMTP_PASSWORD
-
-            # Tell the app exactly where the mounted xlsx file will be
+            # CSV file path inside the pod
             - name: DATA_FILE
-              value: "/data/certs.xlsx"
+              value: "/data/certs.csv"
 
-          # ── Mount the xlsx ConfigMap as a file at /data/ ──────────────────
+          # ── Mount CSV ConfigMap as /data/certs.csv ────────────────────────
           volumeMounts:
             - name: cert-data-volume
-              mountPath: /data          # file appears as /data/certs.xlsx
+              mountPath: /data
               readOnly: true
 
-          # ── Resource limits ───────────────────────────────────────────────
           resources:
             requests:
               cpu: "50m"
@@ -58,16 +55,12 @@ spec:
               cpu: "200m"
               memory: "256Mi"
 
-      # ── Volumes ───────────────────────────────────────────────────────────
       volumes:
         - name: cert-data-volume
           configMap:
-            name: cert-data-file        # ← name of the ConfigMap created from xlsx
-            # Kubernetes mounts each key as a file.
-            # If your ConfigMap key is "certs.xlsx", the file lands at /data/certs.xlsx
-            # If kubectl used a different key name, set it explicitly:
+            name: cert-data-file
             items:
-              - key: certs.xlsx         # ← exact key name inside the ConfigMap
-                path: certs.xlsx        # ← filename the pod will see at /data/
+              - key: certs.csv      # ← must match kubectl --from-file key
+                path: certs.csv     # pod sees /data/certs.csv
 
       restartPolicy: Always
