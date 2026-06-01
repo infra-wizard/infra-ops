@@ -29,3 +29,6 @@ print('Done - certs_fixed.csv created')
 # Verify - should show comma separated with all rows
 head -2 certs_fixed.csv
 wc -l certs_fixed.csv
+
+
+kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
