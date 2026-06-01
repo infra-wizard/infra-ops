@@ -43,3 +43,8 @@ kubectl patch configmap cert-monitor-config \
 
 kubectl rollout restart deployment/cert-expiry-monitor
 
+kubectl patch configmap cert-monitor-config \
+  --type merge \
+  -p '{"data":{"IDENTITY_COLUMNS":"TWX_AppKey"}}'
+
+
