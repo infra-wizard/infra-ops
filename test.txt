@@ -1,2 +1,13 @@
-docker compose --env-file .env -f docker-compose-postgres.yml up
-docker compose --env-file .env -f docker-compose-postgres.yml down -v
+python convert_xlsx_to_csv.py certs.xlsx
+# produces certs.csv
+
+kubectl delete configmap cert-data-file
+
+kubectl create configmap cert-data-file --from-file=certs.csv
+
+# Verify the key is "certs.csv" not "certs.xlsx"
+kubectl get configmap cert-data-file -o jsonpath='{.data}' | python3 -m json.tool
+
+kubectl patch configmap cert-monitor-config \
+  --type merge \
+  -p '{"data":{"DATA_FILE":"/data/certs.csv"}}'
