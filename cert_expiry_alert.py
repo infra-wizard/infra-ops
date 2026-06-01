@@ -241,13 +241,18 @@ def send_alert(alerts: list[dict]):
     msg["To"]      = ", ".join(ALERT_RECIPIENTS)
     msg.attach(MIMEText(build_html(alerts), "html"))
 
+    # SMTP_REQUIRE_AUTH controls whether to login.
+    # Internal corporate relays (port 25) use IP-based auth — no login needed.
+    require_auth = _env("SMTP_REQUIRE_AUTH", "false").lower() == "true"
+
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as srv:
             srv.ehlo()
             if SMTP_USE_TLS:
                 srv.starttls()
                 srv.ehlo()
-            srv.login(SMTP_USER, SMTP_PASSWORD)
+            if require_auth:
+                srv.login(SMTP_USER, SMTP_PASSWORD)
             srv.sendmail(SMTP_USER, ALERT_RECIPIENTS, msg.as_string())
         log.info("✅ Email sent to: %s", ", ".join(ALERT_RECIPIENTS))
     except smtplib.SMTPAuthenticationError:
