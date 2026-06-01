@@ -35,3 +35,8 @@ print('Saved certs_fixed.csv')
 
 
 kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
+
+
+kubectl patch configmap cert-monitor-config \
+  --type merge \
+  -p '{"data":{"SMTP_USE_TLS":"false","SMTP_PORT":"25"}}
