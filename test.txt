@@ -18,17 +18,20 @@ kubectl patch configmap cert-monitor-config \
 python3 -c "
 import pandas as pd
 
-# Read as TAB separated
+# Read tab-separated original, skip the bad index column
 df = pd.read_csv('certs.csv', sep='\t', dtype=str)
+
+# Drop unnamed index column if present
+df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+
 print('Columns:', df.columns.tolist())
 print('Rows:', len(df))
-df.to_csv('certs_fixed.csv', index=False)
-print('Done - certs_fixed.csv created')
-"
+print(df.to_string())
 
-# Verify - should show comma separated with all rows
-head -2 certs_fixed.csv
-wc -l certs_fixed.csv
+# Save without index
+df.to_csv('certs_fixed.csv', index=False)
+print('Saved certs_fixed.csv')
+"
 
 
 kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
