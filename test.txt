@@ -11,3 +11,21 @@ kubectl get configmap cert-data-file -o jsonpath='{.data}' | python3 -m json.too
 kubectl patch configmap cert-monitor-config \
   --type merge \
   -p '{"data":{"DATA_FILE":"/data/certs.csv"}}'
+
+
+
+# Convert tab-separated to comma CSV and fix all issues
+python3 -c "
+import pandas as pd
+
+# Read as TAB separated
+df = pd.read_csv('certs.csv', sep='\t', dtype=str)
+print('Columns:', df.columns.tolist())
+print('Rows:', len(df))
+df.to_csv('certs_fixed.csv', index=False)
+print('Done - certs_fixed.csv created')
+"
+
+# Verify - should show comma separated with all rows
+head -2 certs_fixed.csv
+wc -l certs_fixed.csv
