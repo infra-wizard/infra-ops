@@ -48,3 +48,32 @@ kubectl patch configmap cert-monitor-config \
   -p '{"data":{"IDENTITY_COLUMNS":"TWX_AppKey"}}'
 
 
+
+
+
+
+
+python3 -c "
+import pandas as pd
+
+# Read original tab-separated file with ALL rows
+df = pd.read_csv('certs.xlsx', sep='\t', dtype=str)
+
+# Drop unnamed index columns
+df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+
+print('Rows found:', len(df))
+print('Columns:', df.columns.tolist())
+print(df[['TWX_AppKey']].to_string())  # show env names
+
+df.to_csv('certs_fixed.csv', index=False)
+print('Saved certs_fixed.csv')
+"
+
+# Check all rows are there
+cat certs_fixed.csv
+
+kubectl delete configmap cert-data-file
+kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
+kubectl rollout restart deployment/cert-expiry-monitor
+
