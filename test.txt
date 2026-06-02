@@ -1,84 +1,34 @@
-python convert_xlsx_to_csv.py certs.xlsx
-# produces certs.csv
-
-kubectl delete configmap cert-data-file
-
-kubectl create configmap cert-data-file --from-file=certs.csv
-
-# Verify the key is "certs.csv" not "certs.xlsx"
-kubectl get configmap cert-data-file -o jsonpath='{.data}' | python3 -m json.tool
-
-kubectl patch configmap cert-monitor-config \
-  --type merge \
-  -p '{"data":{"DATA_FILE":"/data/certs.csv"}}'
-
-
-
-# Convert tab-separated to comma CSV and fix all issues
+# Check EXACT column names in your CSV
 python3 -c "
 import pandas as pd
-
-# Read tab-separated original, skip the bad index column
-df = pd.read_csv('certs.csv', sep='\t', dtype=str)
-
-# Drop unnamed index column if present
-df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-
-print('Columns:', df.columns.tolist())
-print('Rows:', len(df))
-print(df.to_string())
-
-# Save without index
-df.to_csv('certs_fixed.csv', index=False)
-print('Saved certs_fixed.csv')
+df = pd.read_csv('certs_fixed.csv', dtype=str)
+print('Exact columns:')
+for i, col in enumerate(df.columns):
+    print(f'  [{i}] repr={repr(col)}')
+print()
+print('First column values:', df.iloc[:,0].tolist())
 "
 
-
-kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
-
-
-kubectl patch configmap cert-monitor-config \
-  --type merge \
-  -p '{"data":{"SMTP_USE_TLS":"false","SMTP_PORT":"25"}}
-
-kubectl rollout restart deployment/cert-expiry-monitor
-
-kubectl patch configmap cert-monitor-config \
-  --type merge \
-  -p '{"data":{"IDENTITY_COLUMNS":"TWX_AppKey"}}'
-
-
-
-
-
-
-
+# Fix column name and recreate CSV
 python3 -c "
 import pandas as pd
+df = pd.read_csv('certs_fixed.csv', dtype=str)
 
-# Read original tab-separated file with ALL rows
-df = pd.read_csv('certs.xlsx', sep='\t', dtype=str)
+# Strip whitespace from ALL column names
+df.columns = df.columns.str.strip()
 
-# Drop unnamed index columns
-df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-
-print('Rows found:', len(df))
-print('Columns:', df.columns.tolist())
-print(df[['TWX_AppKey']].to_string())  # show env names
+print('Cleaned columns:', df.columns.tolist())
+print('TWX_AppKey values:', df['TWX_AppKey'].tolist())
 
 df.to_csv('certs_fixed.csv', index=False)
-print('Saved certs_fixed.csv')
+print('Saved')
 "
 
-# Check all rows are there
-cat certs_fixed.csv
-
+# Recreate ConfigMap
 kubectl delete configmap cert-data-file
 kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
+
 kubectl rollout restart deployment/cert-expiry-monitor
-
-
-kubectl patch configmap cert-monitor-config \
-  --type merge \
-  -p '{"data":{"DATE_COLUMNS":"Ingress-cert,SSO-cert,AKS Version- End of life,PTC License,ProvisioningKe,emessagekey","IDENTITY_COLUMNS":"TWX_AppKey"}}'
+sleep 20
+kubectl logs -l app=cert-expiry-monitor -f
 
