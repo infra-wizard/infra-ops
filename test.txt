@@ -78,4 +78,7 @@ kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
 kubectl rollout restart deployment/cert-expiry-monitor
 
 
+kubectl patch configmap cert-monitor-config \
+  --type merge \
+  -p '{"data":{"DATE_COLUMNS":"Ingress-cert,SSO-cert,AKS Version- End of life,PTC License,ProvisioningKe,emessagekey","IDENTITY_COLUMNS":"TWX_AppKey"}}'
 
