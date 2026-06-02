@@ -77,3 +77,19 @@ kubectl delete configmap cert-data-file
 kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
 kubectl rollout restart deployment/cert-expiry-monitor
 
+python3 << 'EOF'
+content = """TWX_AppKey,emessagekey,ProvisioningKe,Azure AD -Client ID,Azure AD -Client secret,Logtools B2C- Client ID,Logtools B2C- Client secret,Ingress-cert,SSO-cert,AKS Version- End of life,PTC License
+dev2,5/18/2026,8/25/2029,7/5/2029,fe526e5e-a1fb-4268-bc1a-05933970523f,5/7/2025,n/a,9/3/2026,4/29/2026,7/1/2025,9/30/2026
+dev3,11/21/2029,11/16/2028,7/24/2025,a507e239-1dad-4ac3-bc0d-6ff444c93f85,4/30/2025,n/a,2/18/2026,5/1/2027,7/1/2025,10/30/2026
+q1,7/22/2026,11/13/2028,8/19/2031,298c1f89-9af1-4fcb-a43d-35350ee1fc3c,8/30/2025,e8388c99-fc2f-4b43-8929-8e1aad6cc270,6/25/2025,2/11/2026,6/26/2026,10/30/2026
+p1,11/21/2029,11/16/2028,7/24/2025,3c2ef9f1-a51a-43eb-8fbf-ca9c08d827df,9/30/2025,faad397e-fd7f-469b-aa82-5e2032c5bdfc,11/7/2025,6/23/2025,11/8/2026,10/30/2026
+"""
+with open('certs_fixed.csv', 'w') as f:
+    f.write(content)
+print("Written successfully")
+EOF
+
+# Verify - must show exactly 5 lines
+wc -l certs_fixed.csv
+cat certs_fixed.csv
+
