@@ -1,38 +1,25 @@
-# Check EXACT column names in your CSV
-python3 -c "
-import pandas as pd
-df = pd.read_csv('certs_fixed.csv', dtype=str)
-print('Exact columns:')
-for i, col in enumerate(df.columns):
-    print(f'  [{i}] repr={repr(col)}')
-print()
-print('First column values:', df.iloc[:,0].tolist())
-"
-
-# Fix column name and recreate CSV
-python3 -c "
-import pandas as pd
-df = pd.read_csv('certs_fixed.csv', dtype=str)
-
-# Strip whitespace from ALL column names
-df.columns = df.columns.str.strip()
-
-print('Cleaned columns:', df.columns.tolist())
-print('TWX_AppKey values:', df['TWX_AppKey'].tolist())
-
-df.to_csv('certs_fixed.csv', index=False)
-print('Saved')
-"
-
-# Recreate ConfigMap
-kubectl delete configmap cert-data-file
-kubectl create configmap cert-data-file --from-file=certs.csv=certs_fixed.csv
-
-kubectl rollout restart deployment/cert-expiry-monitor
-sleep 20
-kubectl logs -l app=cert-expiry-monitor -f
-
-kubectl patch configmap cert-monitor-config \
-  --type merge \
-  -p '{"data":{"IDENTITY_COLUMNS":"ENV"}}'
-
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-app
+  namespace: your-namespace
+  annotations:
+    nginx.org/server-snippets: |
+      error_page 502 503 = @maintenance;
+      location @maintenance {
+        proxy_pass http://maintenance-service.your-namespace.svc.cluster.local:80;
+        proxy_set_header Host $host;
+      }
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: your-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app-service
+                port:
+                  number: 80
