@@ -5,11 +5,13 @@ metadata:
   namespace: your-namespace
   annotations:
     nginx.org/server-snippets: |
-      error_page 502 503 = @maintenance;
-      location @maintenance {
-        proxy_pass http://maintenance-service.your-namespace.svc.cluster.local:80;
-        proxy_set_header Host $host;
-      }
+    proxy_intercept_errors on;
+    error_page 502 503 /maintenance_proxy;
+    location = /maintenance_proxy {
+      internal;
+      proxy_pass http://maintenance-service.your-namespace.svc.cluster.local:80/;
+      proxy_set_header Host $host;
+    }
 spec:
   ingressClassName: nginx
   rules:
