@@ -1,27 +1,2 @@
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: my-app
-  namespace: your-namespace
-  annotations:
-    nginx.org/server-snippets: |
-    proxy_intercept_errors on;
-    error_page 502 503 /maintenance_proxy;
-    location = /maintenance_proxy {
-      internal;
-      proxy_pass http://maintenance-service.your-namespace.svc.cluster.local:80/;
-      proxy_set_header Host $host;
-    }
-spec:
-  ingressClassName: nginx
-  rules:
-    - host: your-app.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: my-app-service
-                port:
-                  number: 80
+kubectl patch secret <secret-name> \
+  -p '{"data":{"key":"'$(echo -n "new-value" | base64)'"}}'
