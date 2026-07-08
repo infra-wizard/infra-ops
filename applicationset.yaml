@@ -14,6 +14,8 @@ spec:
           - name: {{ .name | quote }}
             path: {{ .path | quote }}
             namespace: {{ .namespace | quote }}
+            image: {{ .values.image.repository | base | quote }}
+            imageTag: {{ .values.image.tag | quote }}
             values: {{ .values | default dict | toJson | quote }}
           {{- end }}
   template:
@@ -21,6 +23,8 @@ spec:
       name: '{{ `{{.name}}` }}'
       labels:
         app.kubernetes.io/managed-by: argocd
+        image: '{{ `{{.image}}` }}'
+        imageTag: '{{ `{{.imageTag}}` }}'
     spec:
       project: {{ .Values.project }}
       source:
