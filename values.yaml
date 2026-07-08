@@ -1,0 +1,172 @@
+# Name of the generated ApplicationSet resource
+name: java-apps
+
+# Namespace where the ApplicationSet is created (where ArgoCD runs)
+namespace: argocd
+
+# ArgoCD AppProject to place generated Applications in
+project: default
+
+# Git repository that holds the child Helm charts
+repoURL: https://github.com/ADD-ABT/abbottlink-argo-cd-global.git
+targetRevision: dev3-global
+
+# Target cluster for all generated Applications
+destination:
+  server: https://kubernetes.default.svc
+
+# Sync policy applied to every generated Application
+syncPolicy:
+  syncOptions:
+    - CreateNamespace=true
+
+# The list of Applications to generate.
+# Add a new entry here to deploy another chart — no template changes needed.
+# Everything under `values` is passed straight to the child chart as Helm values.
+applications:
+  - name: message-processor
+    path: applications/java-apps/message-processor
+    namespace: message-processor
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/messageprocessor
+        tag: "2.5.0"
+      replicaCount: 2
+
+  - name: dataarchivepurger
+    path: applications/java-apps/dataarchivepurger
+    namespace: dataarchivepurger
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/dataarchivepurger
+        tag: "2.4.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/SystemRepository
+
+  - name: datalake-ingestion
+    path: applications/java-apps/datalake-ingestion
+    namespace: abbottlink-datalake-ingestion
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/clouddatalakeingestion
+        tag: "2.5.0"
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: "7"
+          memory: "41Gi"
+        limits:
+          cpu: "8"
+          memory: "42Gi"
+      application:
+        javaOpts: "-Xmx40G -Xms40G"
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        bucket: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/ABTLNK.ODRFileRepository
+        odrlog: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/ABTLNK.ODRFileRepository/ingester-logs
+
+  - name: datalake-ingestion-refill
+    path: applications/java-apps/datalake-ingestion-refill
+    namespace: abbottlink-datalake-ingestion-refill
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/clouddatalakeingestion
+        tag: "2.5.0"
+      replicaCount: 1
+      resources:
+        requests:
+          cpu: "10"
+          memory: "50Gi"
+        limits:
+          cpu: "10"
+          memory: "50Gi"
+      application:
+        javaOpts: "-Xmx40G -Xms40G"
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        bucket: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/ABTLNK.ODRFileRepository
+        odrlog: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/ABTLNK.ODRFileRepository/ingester-logs
+
+  - name: device-controller-devicecontroller
+    path: applications/java-apps/devicecontroller
+    namespace: device-controller
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/device-controller
+        tag: "2.4.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository
+
+  - name: fileoperator
+    path: applications/java-apps/fileoperator
+    namespace: fileoperator
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/fileoperator
+        tag: "2.4.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository
+
+  - name: amdsftptest-sftpclient
+    path: applications/java-apps/sftpclient
+    namespace: sftpclient
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/sftpclient
+        tag: "amdsftp-2.4.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository
+
+  - name: file-reader-testcountfilereader
+    path: applications/java-apps/testcountfilereader
+    namespace: test-count
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/testcountfilereader
+        tag: "2.5.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository
+
+  - name: processor-testcountprocessor
+    path: applications/java-apps/testcountprocessor
+    namespace: test-count
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/testcountprocessor
+        tag: "2.5.0"
+      replicaCount: 1
+
+  - name: purger-testcountpurger
+    path: applications/java-apps/testcountpurger
+    namespace: test-count
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/testcountpurger
+        tag: "2.5.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        directory: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository
+
+  - name: rdfilemover
+    path: applications/java-apps/rdfilemover
+    namespace: rdfilemover
+    values:
+      image:
+        repository: d3altwxacr521.azurecr.io/rdfilemover
+        tag: "2.4.0"
+      replicaCount: 1
+      nfs:
+        server: d3algenstor523.file.core.windows.net
+        targz: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/SystemRepository
+        storage: /d3algenstor523/twxfilerepostoragenfs/ThingworxFileRepository/repository/ClinicalFiles
