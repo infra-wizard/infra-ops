@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: {{ .Values.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  goTemplate: true
+  goTemplateOptions:
+    - missingkey=error
+  generators:
+    - list:
+        elements:
+          {{- range .Values.applications }}
+          - name: {{ .name | quote }}
+            path: {{ .path | quote }}
+            namespace: {{ .namespace | quote }}
+            values: {{ .values | default dict | toJson | quote }}
+          {{- end }}
+  template:
+    metadata:
+      name: '{{ `{{.name}}` }}'
+      labels:
+        app.kubernetes.io/managed-by: argocd
+    spec:
+      project: {{ .Values.project }}
+      source:
+        repoURL: {{ .Values.repoURL }}
+        targetRevision: {{ .Values.targetRevision }}
+        path: '{{ `{{.path}}` }}'
+        helm:
+          releaseName: '{{ `{{.name}}` }}'
+          valueFiles:
+            - values.yaml
+          values: '{{ `{{.values}}` }}'
+      destination:
+        server: {{ .Values.destination.server }}
+        namespace: '{{ `{{.namespace}}` }}'
+      syncPolicy:
+        {{- toYaml .Values.syncPolicy | nindent 8 }}
