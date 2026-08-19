@@ -1,0 +1,48 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: azurefile-nfs-encrypted
+provisioner: file.csi.azure.com
+parameters:
+  protocol: nfs
+  encryptInTransit: "true"
+  resourceGroup: myResourceGroup      # RG above
+  storageAccount: mynfsaccount12345   # $SA above
+mountOptions:
+  - nconnect=4
+reclaimPolicy: Retain
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+
+-----
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nfs-encrypted-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: azurefile-nfs-encrypted
+  resources:
+    requests:
+      storage: 100Gi
+
+
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nfs-test-pod
+spec:
+  containers:
+    - name: app
+      image: mcr.microsoft.com/dotnet/runtime-deps:8.0
+      command: ["/bin/sh", "-c", "sleep infinity"]
+      volumeMounts:
+        - name: nfs-vol
+          mountPath: /mnt/nfsdata
+  volumes:
+    - name: nfs-vol
+      persistentVolumeClaim:
+        claimName: nfs-encrypted-pvc
