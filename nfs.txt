@@ -14,6 +14,46 @@ reclaimPolicy: Retain
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
 
+
+----
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-nfs-encrypted
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  mountOptions:
+    - nconnect=4
+  csi:
+    driver: file.csi.azure.com
+    # volumeHandle must be unique per volume; convention: {resource-group}#{storage-account}#{file-share}
+    volumeHandle: myResourceGroup#mynfsaccount12345#mynfsshare
+    volumeAttributes:
+      protocol: nfs
+      encryptInTransit: "true"
+      resourceGroup: myResourceGroup
+      storageAccount: mynfsaccount12345
+      shareName: mynfsshare
+
+
+-----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-nfs-encrypted
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: ""
+  volumeName: pv-nfs-encrypted
+  resources:
+    requests:
+      storage: 100Gi
 -----
 
 apiVersion: v1
@@ -45,4 +85,4 @@ spec:
   volumes:
     - name: nfs-vol
       persistentVolumeClaim:
-        claimName: nfs-encrypted-pvc
+        claimName: pvc-nfs-encrypted
