@@ -223,6 +223,21 @@ TEMPLATE = """<!DOCTYPE html>
   }
   @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
   .card-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; }
+  .type-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+  .type-stat {
+    text-align: center;
+    padding: 10px 6px;
+    border-radius: 10px;
+    background: #1d2029;
+    border: 1px solid var(--border);
+  }
+  .type-stat .n { font-size: 24px; font-weight: 700; }
+  .type-stat .t { font-size: 11px; color: var(--muted); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -239,6 +254,7 @@ TEMPLATE = """<!DOCTYPE html>
   <div class="grid2">
     <div class="card">
       <div class="card-title">Currently open, by type</div>
+      <div class="type-stats" id="typeStats"></div>
       <canvas id="typeChart"></canvas>
     </div>
     <div class="card">
@@ -303,6 +319,13 @@ document.getElementById('note').textContent = DATA.note;
 const TYPE_LABELS = { BUG: 'Bug', VULNERABILITY: 'Vulnerability', CODE_SMELL: 'Code Smell' };
 const TYPE_COLORS = { BUG: '#ef6c6c', VULNERABILITY: '#f0a35c', CODE_SMELL: '#7aa8ff' };
 const typeKeys = Object.keys(DATA.openByType);
+
+document.getElementById('typeStats').innerHTML = typeKeys.map(k => `
+  <div class="type-stat">
+    <div class="n" style="color:${TYPE_COLORS[k] || '#fff'}">${DATA.openByType[k]}</div>
+    <div class="t">${TYPE_LABELS[k] || k}</div>
+  </div>
+`).join('');
 
 new Chart(document.getElementById('typeChart'), {
   type: 'doughnut',
