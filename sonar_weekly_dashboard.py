@@ -316,7 +316,28 @@ new Chart(document.getElementById('typeChart'), {
     }]
   },
   options: {
-    plugins: { legend: { position: 'bottom', labels: { color: '#e6e8ee' } } }
+    plugins: {
+      legend: {
+        position: 'bottom',
+        labels: {
+          color: '#e6e8ee',
+          generateLabels: (chart) => {
+            const ds = chart.data.datasets[0];
+            return chart.data.labels.map((label, i) => ({
+              text: `${label}: ${ds.data[i]}`,
+              fillStyle: ds.backgroundColor[i],
+              strokeStyle: ds.backgroundColor[i],
+              index: i
+            }));
+          }
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${ctx.label}: ${ctx.parsed}`
+        }
+      }
+    }
   }
 });
 
