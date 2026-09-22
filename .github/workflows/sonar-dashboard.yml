@@ -1,0 +1,71 @@
+# Save this file as: .github/workflows/sonar-dashboard.yml
+#
+# What it does:
+#   - Runs on a schedule (default: every Monday 06:00 UTC) and on-demand
+#   - Calls the SonarCloud API server-side (no CORS issue there) via
+#     sonar_weekly_dashboard.py
+#   - Publishes the generated dashboard to GitHub Pages
+#
+# One-time setup (see full instructions in chat):
+#   1. Put sonar_weekly_dashboard.py in the repo root (or update the path below)
+#   2. Repo Settings > Secrets and variables > Actions > New repository secret:
+#        SONAR_TOKEN = your SonarCloud token
+#   3. Repo Settings > Secrets and variables > Actions > Variables tab:
+#        SONAR_PROJECT_KEY = your SonarCloud project key
+#      (or just hardcode --project below if you don't mind it being public)
+#   4. Repo Settings > Pages > Source: "GitHub Actions"
+
+name: Sonar Weekly Dashboard
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # every Monday at 06:00 UTC — adjust as needed
+  workflow_dispatch: {}    # lets you trigger it manually from the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate dashboard
+        env:
+          SONAR_TOKEN: 76e122a1797e52ab9df75b13a0d556e0ced1d987
+        run: |
+          mkdir -p public
+          python3 sonar_weekly_dashboard.py \
+            --project "${{ vars.SONAR_PROJECT_KEY }}" \
+            --weeks 12 \
+            --out public/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
