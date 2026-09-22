@@ -50,7 +50,7 @@ jobs:
         run: |
           mkdir -p public
           python3 sonar_weekly_dashboard.py \
-            --project "${{ vars.SONAR_PROJECT_KEY }}" \
+            --project infra-wizard_anon-ecommerce-website \
             --weeks 12 \
             --out public/index.html
 
