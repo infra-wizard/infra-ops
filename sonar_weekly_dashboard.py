@@ -97,6 +97,20 @@ def fetch_all_issues(token, project_key, branch, extra_params):
     return issues
 
 
+def fetch_total_count(token, project_key, branch, extra_params):
+    """Get just the 'total' field for a query, without paginating full issues."""
+    params = {
+        "componentKeys": project_key,
+        "ps": 1,
+        "p": 1,
+        **extra_params,
+    }
+    if branch:
+        params["branch"] = branch
+    data = api_get("issues/search", token, params)
+    return data.get("total", 0)
+
+
 def iso_week_start(d):
     monday = d - dt.timedelta(days=d.weekday())
     return dt.datetime(monday.year, monday.month, monday.day)
@@ -107,7 +121,7 @@ def parse_sonar_date(s):
     return dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def build_html(project, labels, opened, closed, generated_at, note):
+def build_html(project, labels, opened, closed, generated_at, note, currently_open):
     data = {
         "project": project,
         "labels": labels,
@@ -115,6 +129,7 @@ def build_html(project, labels, opened, closed, generated_at, note):
         "closed": closed,
         "generated": generated_at,
         "note": note,
+        "currentlyOpen": currently_open,
     }
     return TEMPLATE.replace("__DATA__", json.dumps(data))
 
@@ -202,9 +217,10 @@ const totalClosed = DATA.closed.reduce((a,b)=>a+b,0);
 const net = totalOpened - totalClosed;
 
 document.getElementById('stats').innerHTML = `
-  <div class="stat"><div class="label">Opened (window)</div><div class="value opened-color">${totalOpened}</div></div>
-  <div class="stat"><div class="label">Closed (window)</div><div class="value closed-color">${totalClosed}</div></div>
-  <div class="stat"><div class="label">Net change</div><div class="value net-color">${net >= 0 ? '+' + net : net}</div></div>
+  <div class="stat"><div class="label">Currently open (right now)</div><div class="value">${DATA.currentlyOpen}</div></div>
+  <div class="stat"><div class="label">Created in window</div><div class="value opened-color">${totalOpened}</div></div>
+  <div class="stat"><div class="label">Closed in window</div><div class="value closed-color">${totalClosed}</div></div>
+  <div class="stat"><div class="label">Net change (window)</div><div class="value net-color">${net >= 0 ? '+' + net : net}</div></div>
 `;
 
 new Chart(document.getElementById('chart'), {
@@ -212,7 +228,7 @@ new Chart(document.getElementById('chart'), {
   data: {
     labels: DATA.labels,
     datasets: [
-      { label: 'Opened', data: DATA.opened, backgroundColor: '#ef6c6c' },
+      { label: 'Created', data: DATA.opened, backgroundColor: '#ef6c6c' },
       { label: 'Closed', data: DATA.closed, backgroundColor: '#52c993' }
     ]
   },
@@ -229,7 +245,7 @@ new Chart(document.getElementById('chart'), {
   }
 });
 
-let rows = '<tr><th>Week of</th><th>Opened</th><th>Closed</th><th>Net</th></tr>';
+let rows = '<tr><th>Week of</th><th>Created</th><th>Closed</th><th>Net</th></tr>';
 DATA.labels.forEach((label, i) => {
   const o = DATA.opened[i], c = DATA.closed[i], n = o - c;
   rows += `<tr><td>${label}</td><td>${o}</td><td>${c}</td><td>${n >= 0 ? '+' + n : n}</td></tr>`;
@@ -259,13 +275,22 @@ def main():
     ap.add_argument("--out", default="sonar_weekly_dashboard.html", help="Output HTML file path")
     args = ap.parse_args()
 
+    if not args.project or not args.project.strip():
+        raise SystemExit(
+            "No project key was provided (--project was empty). "
+            "In GitHub Actions this usually means the SONAR_PROJECT_KEY "
+            "repository *variable* isn't set, or it was added as a *secret* "
+            "instead of a variable (secrets aren't exposed via ${{ vars.* }}). "
+            "Check Settings > Secrets and variables > Actions > Variables tab."
+        )
+
     token = os.environ.get("SONAR_TOKEN")
     if not token:
         token = input("SonarCloud token: ").strip()
     if not token:
         raise SystemExit("A SonarCloud token is required (set SONAR_TOKEN or enter it when prompted).")
 
-    today = dt.datetime.utcnow()
+    today = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     window_start = iso_week_start(today) - dt.timedelta(weeks=args.weeks - 1)
     fetch_start = window_start - dt.timedelta(weeks=args.lookback_buffer_weeks)
 
@@ -303,6 +328,15 @@ def main():
     opened_series = [opened[w] for w in weeks]
     closed_series = [closed[w] for w in weeks]
 
+    print("Fetching current open-issue total (snapshot, all-time)...")
+    currently_open = fetch_total_count(
+        token,
+        args.project,
+        args.branch,
+        {"statuses": "OPEN,CONFIRMED,REOPENED"},
+    )
+    print(f"Currently open: {currently_open}")
+
     note = (
         f"Issues searched from {fetch_start.date()} onward "
         f"({args.lookback_buffer_weeks}-week lookback buffer before the displayed window) "
@@ -316,8 +350,9 @@ def main():
         week_labels,
         opened_series,
         closed_series,
-        dt.datetime.utcnow().isoformat() + "Z",
+        dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         note,
+        currently_open,
     )
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
