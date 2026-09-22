@@ -55,6 +55,7 @@ import urllib.request
 API_BASE = "https://sonarcloud.io/api"
 PAGE_SIZE = 500
 MAX_PAGES = 40  # safety cap: 40 * 500 = 20,000 issues
+ISSUE_TYPES = ["BUG", "VULNERABILITY", "CODE_SMELL"]
 
 
 def api_get(path, token, params):
@@ -107,8 +108,30 @@ def fetch_total_count(token, project_key, branch, extra_params):
     }
     if branch:
         params["branch"] = branch
+    print(f"  [debug] issues/search params: {params}")
     data = api_get("issues/search", token, params)
     return data.get("total", 0)
+
+
+def fetch_open_by_type(token, project_key, branch, extra_params):
+    """One API call using the 'types' facet to get open-issue counts per type."""
+    params = {
+        "componentKeys": project_key,
+        "ps": 1,
+        "p": 1,
+        "facets": "types",
+        **extra_params,
+    }
+    if branch:
+        params["branch"] = branch
+    data = api_get("issues/search", token, params)
+    counts = {t: 0 for t in ISSUE_TYPES}
+    for facet in data.get("facets", []):
+        if facet.get("property") == "types":
+            for v in facet.get("values", []):
+                if v["val"] in counts:
+                    counts[v["val"]] = v["count"]
+    return counts
 
 
 def iso_week_start(d):
@@ -121,7 +144,8 @@ def parse_sonar_date(s):
     return dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def build_html(project, labels, opened, closed, generated_at, note, currently_open):
+def build_html(project, labels, opened, closed, generated_at, note, currently_open,
+                open_by_type, created_by_type, closed_by_type):
     data = {
         "project": project,
         "labels": labels,
@@ -130,6 +154,9 @@ def build_html(project, labels, opened, closed, generated_at, note, currently_op
         "generated": generated_at,
         "note": note,
         "currentlyOpen": currently_open,
+        "openByType": open_by_type,
+        "createdByType": created_by_type,
+        "closedByType": closed_by_type,
     }
     return TEMPLATE.replace("__DATA__", json.dumps(data))
 
@@ -138,6 +165,9 @@ TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>SonarCloud Weekly Issues Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
@@ -187,6 +217,14 @@ TEMPLATE = """<!DOCTYPE html>
   th { color: var(--muted); font-weight: 600; }
   canvas { max-height: 380px; }
   .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .grid2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .card-title { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 12px; }
 </style>
 </head>
 <body>
@@ -198,6 +236,17 @@ TEMPLATE = """<!DOCTYPE html>
 
   <div class="card">
     <canvas id="chart"></canvas>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="card-title">Currently open, by type</div>
+      <canvas id="typeChart"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-title">Created / closed in window, by type</div>
+      <table id="typeTable"></table>
+    </div>
   </div>
 
   <div class="card">
@@ -252,6 +301,30 @@ DATA.labels.forEach((label, i) => {
 });
 document.getElementById('table').innerHTML = rows;
 document.getElementById('note').textContent = DATA.note;
+
+const TYPE_LABELS = { BUG: 'Bug', VULNERABILITY: 'Vulnerability', CODE_SMELL: 'Code Smell' };
+const TYPE_COLORS = { BUG: '#ef6c6c', VULNERABILITY: '#f0a35c', CODE_SMELL: '#7aa8ff' };
+const typeKeys = Object.keys(DATA.openByType);
+
+new Chart(document.getElementById('typeChart'), {
+  type: 'doughnut',
+  data: {
+    labels: typeKeys.map(k => TYPE_LABELS[k] || k),
+    datasets: [{
+      data: typeKeys.map(k => DATA.openByType[k]),
+      backgroundColor: typeKeys.map(k => TYPE_COLORS[k] || '#888')
+    }]
+  },
+  options: {
+    plugins: { legend: { position: 'bottom', labels: { color: '#e6e8ee' } } }
+  }
+});
+
+let typeRows = '<tr><th>Type</th><th>Created</th><th>Closed</th></tr>';
+typeKeys.forEach(k => {
+  typeRows += `<tr><td>${TYPE_LABELS[k] || k}</td><td>${DATA.createdByType[k] || 0}</td><td>${DATA.closedByType[k] || 0}</td></tr>`;
+});
+document.getElementById('typeTable').innerHTML = typeRows;
 </script>
 </body>
 </html>
@@ -308,22 +381,29 @@ def main():
     opened = {w: 0 for w in weeks}
     closed = {w: 0 for w in weeks}
     week_set = set(weeks)
+    created_by_type = {t: 0 for t in ISSUE_TYPES}
+    closed_by_type = {t: 0 for t in ISSUE_TYPES}
 
     def bucket_for(date):
         wk = iso_week_start(date)
         return wk if wk in week_set else None
 
     for issue in issues:
+        issue_type = issue.get("type")
         created = parse_sonar_date(issue["creationDate"])
         wk = bucket_for(created)
         if wk is not None:
             opened[wk] += 1
+            if issue_type in created_by_type:
+                created_by_type[issue_type] += 1
         close_date_str = issue.get("closeDate")
         if close_date_str:
             closed_dt = parse_sonar_date(close_date_str)
             wk2 = bucket_for(closed_dt)
             if wk2 is not None:
                 closed[wk2] += 1
+                if issue_type in closed_by_type:
+                    closed_by_type[issue_type] += 1
 
     opened_series = [opened[w] for w in weeks]
     closed_series = [closed[w] for w in weeks]
@@ -336,6 +416,15 @@ def main():
         {"statuses": "OPEN,CONFIRMED,REOPENED"},
     )
     print(f"Currently open: {currently_open}")
+
+    print("Fetching open-issue breakdown by type...")
+    open_by_type = fetch_open_by_type(
+        token,
+        args.project,
+        args.branch,
+        {"statuses": "OPEN,CONFIRMED,REOPENED"},
+    )
+    print(f"Open by type: {open_by_type}")
 
     note = (
         f"Issues searched from {fetch_start.date()} onward "
@@ -353,6 +442,9 @@ def main():
         dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         note,
         currently_open,
+        open_by_type,
+        created_by_type,
+        closed_by_type,
     )
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
