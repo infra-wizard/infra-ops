@@ -13,14 +13,13 @@ writes a self-contained HTML file you can open in any browser.
 
 What it does
 ------------
-1. Fetches issues for your project from SonarCloud's `issues/search` API.
-2. Buckets them by ISO week (Monday-start):
-     - "opened"  = issues whose creationDate falls in that week
-     - "closed"  = issues whose closeDate falls in that week
-   (closeDate is set on an issue independent of when it was created, so a
-   bug opened months ago that got fixed this week still counts as "closed
-   this week".)
-3. Writes sonar_weekly_dashboard.html with a bar chart + table.
+1. Fetches issues created within the displayed weekly window ("created" series).
+2. Separately fetches CLOSED issues for the project — by default with no
+   limit on how far back they were created, since an issue's closeDate is
+   independent of its creationDate (a bug filed a year ago can close this
+   week) — and buckets them by closeDate ("closed" series).
+3. Writes sonar_weekly_dashboard.html with a bar chart + table, plus a
+   breakdown by issue type (Bug / Vulnerability / Code Smell).
 
 Usage
 -----
@@ -108,7 +107,6 @@ def fetch_total_count(token, project_key, branch, extra_params):
     }
     if branch:
         params["branch"] = branch
-    print(f"  [debug] issues/search params: {params}")
     data = api_get("issues/search", token, params)
     return data.get("total", 0)
 
@@ -360,11 +358,14 @@ def main():
     ap.add_argument(
         "--lookback-buffer-weeks",
         type=int,
-        default=52,
-        help="Extra weeks searched before the window, to catch issues created "
-             "earlier but closed inside the window (default 52). Increase this "
-             "if issues in your project often stay open for a long time before "
-             "being closed.",
+        default=None,
+        help="By default, closed issues are searched with NO limit on how far "
+             "back they were created (so closures of old issues are never "
+             "missed). For very large/old projects this can mean scanning a "
+             "lot of history; pass this to only search CLOSED issues created "
+             "in the last N weeks before the displayed window, as a "
+             "performance shortcut. Leave unset unless you hit rate limits "
+             "or the run is too slow.",
     )
     ap.add_argument("--out", default="sonar_weekly_dashboard.html", help="Output HTML file path")
     args = ap.parse_args()
@@ -386,30 +387,55 @@ def main():
 
     today = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
     window_start = iso_week_start(today) - dt.timedelta(weeks=args.weeks - 1)
-    fetch_start = window_start - dt.timedelta(weeks=args.lookback_buffer_weeks)
-
-    print(f"Fetching issues for '{args.project}' created on/after {fetch_start.date()} ...")
-    issues = fetch_all_issues(
-        token,
-        args.project,
-        args.branch,
-        {"createdAfter": fetch_start.strftime("%Y-%m-%d")},
-    )
-    print(f"Fetched {len(issues)} issues total.")
+    window_end = window_start + dt.timedelta(weeks=args.weeks)  # exclusive
 
     weeks = [window_start + dt.timedelta(weeks=i) for i in range(args.weeks)]
     week_labels = [w.strftime("%Y-%m-%d") for w in weeks]
-    opened = {w: 0 for w in weeks}
-    closed = {w: 0 for w in weeks}
     week_set = set(weeks)
-    created_by_type = {t: 0 for t in ISSUE_TYPES}
-    closed_by_type = {t: 0 for t in ISSUE_TYPES}
 
     def bucket_for(date):
         wk = iso_week_start(date)
         return wk if wk in week_set else None
 
-    for issue in issues:
+    # --- "Created in window": issues whose creationDate falls in the window.
+    # Safe to filter by createdAfter/createdBefore directly since we're
+    # bucketing by that same date.
+    print(f"Fetching issues created between {window_start.date()} and {window_end.date()} ...")
+    created_params = {
+        "createdAfter": window_start.strftime("%Y-%m-%d"),
+        "createdBefore": window_end.strftime("%Y-%m-%d"),
+    }
+    created_issues = fetch_all_issues(token, args.project, args.branch, created_params)
+    print(f"Fetched {len(created_issues)} issues created in window.")
+
+    # --- "Closed in window": issues whose closeDate falls in the window.
+    # closeDate is independent of creationDate (an issue can be created
+    # months or years before it's closed), so this must NOT be filtered by
+    # createdAfter/createdBefore, or closures of older issues get missed
+    # entirely — which is what was causing closed counts to show as 0.
+    closed_params = {"statuses": "CLOSED"}
+    if args.lookback_buffer_weeks is not None:
+        lookback_start = window_start - dt.timedelta(weeks=args.lookback_buffer_weeks)
+        closed_params["createdAfter"] = lookback_start.strftime("%Y-%m-%d")
+        print(f"Fetching CLOSED issues created on/after {lookback_start.date()} "
+              f"(--lookback-buffer-weeks={args.lookback_buffer_weeks}) ...")
+    else:
+        print("Fetching ALL closed issues for this project (no creation-date limit) ...")
+    closed_issues = fetch_all_issues(token, args.project, args.branch, closed_params)
+    print(f"Fetched {len(closed_issues)} closed issues total.")
+    with_close_date = [i for i in closed_issues if i.get("closeDate")]
+    print(f"  of which {len(with_close_date)} have a closeDate set.")
+    if closed_issues and not with_close_date:
+        print("  NOTE: none of the closed issues returned by the API have a "
+              "closeDate field — your SonarCloud instance/plan may not expose "
+              "it for this project.")
+
+    opened = {w: 0 for w in weeks}
+    closed = {w: 0 for w in weeks}
+    created_by_type = {t: 0 for t in ISSUE_TYPES}
+    closed_by_type = {t: 0 for t in ISSUE_TYPES}
+
+    for issue in created_issues:
         issue_type = issue.get("type")
         created = parse_sonar_date(issue["creationDate"])
         wk = bucket_for(created)
@@ -417,14 +443,15 @@ def main():
             opened[wk] += 1
             if issue_type in created_by_type:
                 created_by_type[issue_type] += 1
-        close_date_str = issue.get("closeDate")
-        if close_date_str:
-            closed_dt = parse_sonar_date(close_date_str)
-            wk2 = bucket_for(closed_dt)
-            if wk2 is not None:
-                closed[wk2] += 1
-                if issue_type in closed_by_type:
-                    closed_by_type[issue_type] += 1
+
+    for issue in with_close_date:
+        issue_type = issue.get("type")
+        closed_dt = parse_sonar_date(issue["closeDate"])
+        wk2 = bucket_for(closed_dt)
+        if wk2 is not None:
+            closed[wk2] += 1
+            if issue_type in closed_by_type:
+                closed_by_type[issue_type] += 1
 
     opened_series = [opened[w] for w in weeks]
     closed_series = [closed[w] for w in weeks]
@@ -447,13 +474,20 @@ def main():
     )
     print(f"Open by type: {open_by_type}")
 
-    note = (
-        f"Issues searched from {fetch_start.date()} onward "
-        f"({args.lookback_buffer_weeks}-week lookback buffer before the displayed window) "
-        "to catch issues created earlier but closed inside the window. "
-        "If issues in this project can stay open longer than that, increase "
-        "--lookback-buffer-weeks and re-run."
-    )
+    if args.lookback_buffer_weeks is not None:
+        note = (
+            f"'Created' counts issues created in the displayed window. 'Closed' counts "
+            f"issues whose closeDate falls in the window, searched among CLOSED issues "
+            f"created in the last {args.lookback_buffer_weeks} weeks before the window. "
+            "If closures still look too low, drop --lookback-buffer-weeks entirely to "
+            "search all closed issues regardless of creation date."
+        )
+    else:
+        note = (
+            "'Created' counts issues created in the displayed window. 'Closed' counts "
+            "issues whose closeDate falls in the window, searched across ALL closed "
+            "issues for this project regardless of when they were created."
+        )
 
     html = build_html(
         args.project,
