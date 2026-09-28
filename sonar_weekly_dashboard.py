@@ -24,14 +24,16 @@ What it does
 Usage
 -----
     export SONAR_TOKEN="your_sonarcloud_token"
-    python3 sonar_weekly_dashboard.py --project my-project-key --weeks 12
 
-    # If your project is inside an organization and the key alone isn't
-    # unique, SonarCloud project keys are already globally unique, so you
-    # normally don't need to pass the org separately.
+    # Single project
+    python3 sonar_weekly_dashboard.py --projects my-project-key --weeks 12
 
-    # Optional: specific branch (defaults to the project's main branch)
-    python3 sonar_weekly_dashboard.py --project my-project-key --branch develop
+    # Multiple projects — one dashboard, with a dropdown to switch between them
+    python3 sonar_weekly_dashboard.py --projects "proj-key-1,proj-key-2,proj-key-3"
+
+    # Optional: specific branch (defaults to each project's main branch;
+    # applies to all projects passed in this run)
+    python3 sonar_weekly_dashboard.py --projects my-project-key --branch develop
 
 Re-run it any time — e.g. as a weekly cron job / Windows Task Scheduler
 entry — to refresh the dashboard with the latest data.
@@ -142,20 +144,110 @@ def parse_sonar_date(s):
     return dt.datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")
 
 
-def build_html(project, labels, opened, closed, generated_at, note, currently_open,
-                open_by_type, created_by_type, closed_by_type):
-    data = {
+def compute_project_data(token, project, branch, weeks_n, lookback_buffer_weeks):
+    """Fetch and bucket all data for one project. Returns a dict ready for build_html."""
+    today = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
+    window_start = iso_week_start(today) - dt.timedelta(weeks=weeks_n - 1)
+    window_end = window_start + dt.timedelta(weeks=weeks_n)  # exclusive
+
+    weeks = [window_start + dt.timedelta(weeks=i) for i in range(weeks_n)]
+    week_labels = [w.strftime("%Y-%m-%d") for w in weeks]
+    week_set = set(weeks)
+
+    def bucket_for(date):
+        wk = iso_week_start(date)
+        return wk if wk in week_set else None
+
+    print(f"[{project}] Fetching issues created between {window_start.date()} and {window_end.date()} ...")
+    created_params = {
+        "createdAfter": window_start.strftime("%Y-%m-%d"),
+        "createdBefore": window_end.strftime("%Y-%m-%d"),
+    }
+    created_issues = fetch_all_issues(token, project, branch, created_params)
+    print(f"[{project}] Fetched {len(created_issues)} issues created in window.")
+
+    closed_params = {"statuses": "CLOSED"}
+    if lookback_buffer_weeks is not None:
+        lookback_start = window_start - dt.timedelta(weeks=lookback_buffer_weeks)
+        closed_params["createdAfter"] = lookback_start.strftime("%Y-%m-%d")
+        print(f"[{project}] Fetching CLOSED issues created on/after {lookback_start.date()} "
+              f"(--lookback-buffer-weeks={lookback_buffer_weeks}) ...")
+    else:
+        print(f"[{project}] Fetching ALL closed issues for this project (no creation-date limit) ...")
+    closed_issues = fetch_all_issues(token, project, branch, closed_params)
+    print(f"[{project}] Fetched {len(closed_issues)} closed issues total.")
+    with_close_date = [i for i in closed_issues if i.get("closeDate")]
+    print(f"[{project}]   of which {len(with_close_date)} have a closeDate set.")
+    if closed_issues and not with_close_date:
+        print(f"[{project}]   NOTE: none of the closed issues returned by the API have a "
+              "closeDate field — your SonarCloud instance/plan may not expose "
+              "it for this project.")
+
+    opened = {w: 0 for w in weeks}
+    closed = {w: 0 for w in weeks}
+    created_by_type = {t: 0 for t in ISSUE_TYPES}
+    closed_by_type = {t: 0 for t in ISSUE_TYPES}
+
+    for issue in created_issues:
+        issue_type = issue.get("type")
+        created = parse_sonar_date(issue["creationDate"])
+        wk = bucket_for(created)
+        if wk is not None:
+            opened[wk] += 1
+            if issue_type in created_by_type:
+                created_by_type[issue_type] += 1
+
+    for issue in with_close_date:
+        issue_type = issue.get("type")
+        closed_dt = parse_sonar_date(issue["closeDate"])
+        wk2 = bucket_for(closed_dt)
+        if wk2 is not None:
+            closed[wk2] += 1
+            if issue_type in closed_by_type:
+                closed_by_type[issue_type] += 1
+
+    print(f"[{project}] Fetching current open-issue total (snapshot, all-time)...")
+    currently_open = fetch_total_count(
+        token, project, branch, {"statuses": "OPEN,CONFIRMED,REOPENED"},
+    )
+    print(f"[{project}] Currently open: {currently_open}")
+
+    print(f"[{project}] Fetching open-issue breakdown by type...")
+    open_by_type = fetch_open_by_type(
+        token, project, branch, {"statuses": "OPEN,CONFIRMED,REOPENED"},
+    )
+    print(f"[{project}] Open by type: {open_by_type}")
+
+    if lookback_buffer_weeks is not None:
+        note = (
+            f"'Created' counts issues created in the displayed window. 'Closed' counts "
+            f"issues whose closeDate falls in the window, searched among CLOSED issues "
+            f"created in the last {lookback_buffer_weeks} weeks before the window. "
+            "If closures still look too low, drop --lookback-buffer-weeks entirely to "
+            "search all closed issues regardless of creation date."
+        )
+    else:
+        note = (
+            "'Created' counts issues created in the displayed window. 'Closed' counts "
+            "issues whose closeDate falls in the window, searched across ALL closed "
+            "issues for this project regardless of when they were created."
+        )
+
+    return {
         "project": project,
-        "labels": labels,
-        "opened": opened,
-        "closed": closed,
-        "generated": generated_at,
+        "labels": week_labels,
+        "opened": [opened[w] for w in weeks],
+        "closed": [closed[w] for w in weeks],
         "note": note,
         "currentlyOpen": currently_open,
         "openByType": open_by_type,
         "createdByType": created_by_type,
         "closedByType": closed_by_type,
     }
+
+
+def build_html(projects, generated_at):
+    data = {"generated": generated_at, "projects": projects}
     return TEMPLATE.replace("__DATA__", json.dumps(data))
 
 
@@ -238,12 +330,35 @@ TEMPLATE = """<!DOCTYPE html>
   }
   .type-stat .n { font-size: 24px; font-weight: 700; }
   .type-stat .t { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .project-select {
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    min-width: 200px;
+  }
+  .project-select:focus { outline: 1px solid var(--net); }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1 id="title">SonarCloud Weekly Issues</h1>
-  <div class="sub" id="subtitle"></div>
+  <div class="top-row">
+    <div>
+      <h1 id="title">SonarCloud Weekly Issues</h1>
+      <div class="sub" id="subtitle"></div>
+    </div>
+    <select id="projectSelect" class="project-select"></select>
+  </div>
 
   <div class="stats" id="stats"></div>
 
@@ -271,102 +386,123 @@ TEMPLATE = """<!DOCTYPE html>
 
 <script>
 const DATA = __DATA__;
-
-document.getElementById('title').textContent = 'SonarCloud Weekly Issues — ' + DATA.project;
-document.getElementById('subtitle').textContent = 'Generated ' + new Date(DATA.generated).toLocaleString();
-
-const totalOpened = DATA.opened.reduce((a,b)=>a+b,0);
-const totalClosed = DATA.closed.reduce((a,b)=>a+b,0);
-const net = totalOpened - totalClosed;
-
-document.getElementById('stats').innerHTML = `
-  <div class="stat"><div class="label">Currently open (right now)</div><div class="value">${DATA.currentlyOpen}</div></div>
-  <div class="stat"><div class="label">Created in window</div><div class="value opened-color">${totalOpened}</div></div>
-  <div class="stat"><div class="label">Closed in window</div><div class="value closed-color">${totalClosed}</div></div>
-  <div class="stat"><div class="label">Net change (window)</div><div class="value net-color">${net >= 0 ? '+' + net : net}</div></div>
-`;
-
-new Chart(document.getElementById('chart'), {
-  type: 'bar',
-  data: {
-    labels: DATA.labels,
-    datasets: [
-      { label: 'Created', data: DATA.opened, backgroundColor: '#ef6c6c' },
-      { label: 'Closed', data: DATA.closed, backgroundColor: '#52c993' }
-    ]
-  },
-  options: {
-    responsive: true,
-    plugins: {
-      legend: { labels: { color: '#e6e8ee' } },
-      title: { display: false }
-    },
-    scales: {
-      x: { ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } },
-      y: { beginAtZero: true, ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } }
-    }
-  }
-});
-
-let rows = '<tr><th>Week of</th><th>Created</th><th>Closed</th><th>Net</th></tr>';
-DATA.labels.forEach((label, i) => {
-  const o = DATA.opened[i], c = DATA.closed[i], n = o - c;
-  rows += `<tr><td>${label}</td><td>${o}</td><td>${c}</td><td>${n >= 0 ? '+' + n : n}</td></tr>`;
-});
-document.getElementById('table').innerHTML = rows;
-document.getElementById('note').textContent = DATA.note;
-
 const TYPE_LABELS = { BUG: 'Bug', VULNERABILITY: 'Vulnerability', CODE_SMELL: 'Code Smell' };
 const TYPE_COLORS = { BUG: '#ef6c6c', VULNERABILITY: '#f0a35c', CODE_SMELL: '#7aa8ff' };
-const typeKeys = Object.keys(DATA.openByType);
 
-document.getElementById('typeStats').innerHTML = typeKeys.map(k => `
-  <div class="type-stat">
-    <div class="n" style="color:${TYPE_COLORS[k] || '#fff'}">${DATA.openByType[k]}</div>
-    <div class="t">${TYPE_LABELS[k] || k}</div>
-  </div>
-`).join('');
+let mainChart = null;
+let typeChart = null;
 
-new Chart(document.getElementById('typeChart'), {
-  type: 'doughnut',
-  data: {
-    labels: typeKeys.map(k => TYPE_LABELS[k] || k),
-    datasets: [{
-      data: typeKeys.map(k => DATA.openByType[k]),
-      backgroundColor: typeKeys.map(k => TYPE_COLORS[k] || '#888')
-    }]
-  },
-  options: {
-    plugins: {
-      legend: {
-        position: 'bottom',
-        labels: {
-          color: '#e6e8ee',
-          generateLabels: (chart) => {
-            const ds = chart.data.datasets[0];
-            return chart.data.labels.map((label, i) => ({
-              text: `${label}: ${ds.data[i]}`,
-              fillStyle: ds.backgroundColor[i],
-              strokeStyle: ds.backgroundColor[i],
-              index: i
-            }));
-          }
-        }
+const select = document.getElementById('projectSelect');
+DATA.projects.forEach((p, i) => {
+  const opt = document.createElement('option');
+  opt.value = i;
+  opt.textContent = p.project;
+  select.appendChild(opt);
+});
+select.style.display = DATA.projects.length > 1 ? '' : 'none';
+select.addEventListener('change', () => renderProject(parseInt(select.value, 10)));
+
+function renderProject(idx) {
+  const proj = DATA.projects[idx];
+
+  document.getElementById('title').textContent = 'SonarCloud Weekly Issues — ' + proj.project;
+  document.getElementById('subtitle').textContent = 'Generated ' + new Date(DATA.generated).toLocaleString();
+
+  const totalOpened = proj.opened.reduce((a,b)=>a+b,0);
+  const totalClosed = proj.closed.reduce((a,b)=>a+b,0);
+  const net = totalOpened - totalClosed;
+
+  document.getElementById('stats').innerHTML = `
+    <div class="stat"><div class="label">Currently open (right now)</div><div class="value">${proj.currentlyOpen}</div></div>
+    <div class="stat"><div class="label">Created in window</div><div class="value opened-color">${totalOpened}</div></div>
+    <div class="stat"><div class="label">Closed in window</div><div class="value closed-color">${totalClosed}</div></div>
+    <div class="stat"><div class="label">Net change (window)</div><div class="value net-color">${net >= 0 ? '+' + net : net}</div></div>
+  `;
+
+  if (mainChart) mainChart.destroy();
+  mainChart = new Chart(document.getElementById('chart'), {
+    type: 'bar',
+    data: {
+      labels: proj.labels,
+      datasets: [
+        { label: 'Created', data: proj.opened, backgroundColor: '#ef6c6c' },
+        { label: 'Closed', data: proj.closed, backgroundColor: '#52c993' }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: '#e6e8ee' } },
+        title: { display: false }
       },
-      tooltip: {
-        callbacks: {
-          label: (ctx) => `${ctx.label}: ${ctx.parsed}`
+      scales: {
+        x: { ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } },
+        y: { beginAtZero: true, ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } }
+      }
+    }
+  });
+
+  let rows = '<tr><th>Week of</th><th>Created</th><th>Closed</th><th>Net</th></tr>';
+  proj.labels.forEach((label, i) => {
+    const o = proj.opened[i], c = proj.closed[i], n = o - c;
+    rows += `<tr><td>${label}</td><td>${o}</td><td>${c}</td><td>${n >= 0 ? '+' + n : n}</td></tr>`;
+  });
+  document.getElementById('table').innerHTML = rows;
+  document.getElementById('note').textContent = proj.note;
+
+  const typeKeys = Object.keys(proj.openByType);
+
+  document.getElementById('typeStats').innerHTML = typeKeys.map(k => `
+    <div class="type-stat">
+      <div class="n" style="color:${TYPE_COLORS[k] || '#fff'}">${proj.openByType[k]}</div>
+      <div class="t">${TYPE_LABELS[k] || k}</div>
+    </div>
+  `).join('');
+
+  if (typeChart) typeChart.destroy();
+  typeChart = new Chart(document.getElementById('typeChart'), {
+    type: 'doughnut',
+    data: {
+      labels: typeKeys.map(k => TYPE_LABELS[k] || k),
+      datasets: [{
+        data: typeKeys.map(k => proj.openByType[k]),
+        backgroundColor: typeKeys.map(k => TYPE_COLORS[k] || '#888')
+      }]
+    },
+    options: {
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: '#e6e8ee',
+            generateLabels: (chart) => {
+              const ds = chart.data.datasets[0];
+              return chart.data.labels.map((label, i) => ({
+                text: `${label}: ${ds.data[i]}`,
+                fillStyle: ds.backgroundColor[i],
+                strokeStyle: ds.backgroundColor[i],
+                index: i
+              }));
+            }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.label}: ${ctx.parsed}`
+          }
         }
       }
     }
-  }
-});
+  });
 
-let typeRows = '<tr><th>Type</th><th>Created</th><th>Closed</th></tr>';
-typeKeys.forEach(k => {
-  typeRows += `<tr><td>${TYPE_LABELS[k] || k}</td><td>${DATA.createdByType[k] || 0}</td><td>${DATA.closedByType[k] || 0}</td></tr>`;
-});
-document.getElementById('typeTable').innerHTML = typeRows;
+  let typeRows = '<tr><th>Type</th><th>Created</th><th>Closed</th></tr>';
+  typeKeys.forEach(k => {
+    typeRows += `<tr><td>${TYPE_LABELS[k] || k}</td><td>${proj.createdByType[k] || 0}</td><td>${proj.closedByType[k] || 0}</td></tr>`;
+  });
+  document.getElementById('typeTable').innerHTML = typeRows;
+}
+
+renderProject(0);
 </script>
 </body>
 </html>
@@ -375,8 +511,15 @@ document.getElementById('typeTable').innerHTML = typeRows;
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--project", required=True, help="SonarCloud project key")
-    ap.add_argument("--branch", default=None, help="Branch (default: main branch)")
+    ap.add_argument(
+        "--projects",
+        default=None,
+        help="Comma-separated SonarCloud project keys, e.g. "
+             "'proj-key-1,proj-key-2'. One dashboard is generated with a "
+             "dropdown to switch between them.",
+    )
+    ap.add_argument("--project", default=None, help="Single SonarCloud project key (alias for --projects with one value)")
+    ap.add_argument("--branch", default=None, help="Branch (default: main branch). Applies to all projects passed.")
     ap.add_argument("--weeks", type=int, default=12, help="Number of weeks to show (default 12)")
     ap.add_argument(
         "--lookback-buffer-weeks",
@@ -393,10 +536,13 @@ def main():
     ap.add_argument("--out", default="sonar_weekly_dashboard.html", help="Output HTML file path")
     args = ap.parse_args()
 
-    if not args.project or not args.project.strip():
+    raw = args.projects if args.projects else args.project
+    project_keys = [p.strip() for p in (raw or "").split(",") if p.strip()]
+
+    if not project_keys:
         raise SystemExit(
-            "No project key was provided (--project was empty). "
-            "In GitHub Actions this usually means the SONAR_PROJECT_KEY "
+            "No project key(s) provided (--projects was empty). "
+            "In GitHub Actions this usually means the SONAR_PROJECT_KEY(S) "
             "repository *variable* isn't set, or it was added as a *secret* "
             "instead of a variable (secrets aren't exposed via ${{ vars.* }}). "
             "Check Settings > Secrets and variables > Actions > Variables tab."
@@ -408,122 +554,14 @@ def main():
     if not token:
         raise SystemExit("A SonarCloud token is required (set SONAR_TOKEN or enter it when prompted).")
 
-    today = dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
-    window_start = iso_week_start(today) - dt.timedelta(weeks=args.weeks - 1)
-    window_end = window_start + dt.timedelta(weeks=args.weeks)  # exclusive
-
-    weeks = [window_start + dt.timedelta(weeks=i) for i in range(args.weeks)]
-    week_labels = [w.strftime("%Y-%m-%d") for w in weeks]
-    week_set = set(weeks)
-
-    def bucket_for(date):
-        wk = iso_week_start(date)
-        return wk if wk in week_set else None
-
-    # --- "Created in window": issues whose creationDate falls in the window.
-    # Safe to filter by createdAfter/createdBefore directly since we're
-    # bucketing by that same date.
-    print(f"Fetching issues created between {window_start.date()} and {window_end.date()} ...")
-    created_params = {
-        "createdAfter": window_start.strftime("%Y-%m-%d"),
-        "createdBefore": window_end.strftime("%Y-%m-%d"),
-    }
-    created_issues = fetch_all_issues(token, args.project, args.branch, created_params)
-    print(f"Fetched {len(created_issues)} issues created in window.")
-
-    # --- "Closed in window": issues whose closeDate falls in the window.
-    # closeDate is independent of creationDate (an issue can be created
-    # months or years before it's closed), so this must NOT be filtered by
-    # createdAfter/createdBefore, or closures of older issues get missed
-    # entirely — which is what was causing closed counts to show as 0.
-    closed_params = {"statuses": "CLOSED"}
-    if args.lookback_buffer_weeks is not None:
-        lookback_start = window_start - dt.timedelta(weeks=args.lookback_buffer_weeks)
-        closed_params["createdAfter"] = lookback_start.strftime("%Y-%m-%d")
-        print(f"Fetching CLOSED issues created on/after {lookback_start.date()} "
-              f"(--lookback-buffer-weeks={args.lookback_buffer_weeks}) ...")
-    else:
-        print("Fetching ALL closed issues for this project (no creation-date limit) ...")
-    closed_issues = fetch_all_issues(token, args.project, args.branch, closed_params)
-    print(f"Fetched {len(closed_issues)} closed issues total.")
-    with_close_date = [i for i in closed_issues if i.get("closeDate")]
-    print(f"  of which {len(with_close_date)} have a closeDate set.")
-    if closed_issues and not with_close_date:
-        print("  NOTE: none of the closed issues returned by the API have a "
-              "closeDate field — your SonarCloud instance/plan may not expose "
-              "it for this project.")
-
-    opened = {w: 0 for w in weeks}
-    closed = {w: 0 for w in weeks}
-    created_by_type = {t: 0 for t in ISSUE_TYPES}
-    closed_by_type = {t: 0 for t in ISSUE_TYPES}
-
-    for issue in created_issues:
-        issue_type = issue.get("type")
-        created = parse_sonar_date(issue["creationDate"])
-        wk = bucket_for(created)
-        if wk is not None:
-            opened[wk] += 1
-            if issue_type in created_by_type:
-                created_by_type[issue_type] += 1
-
-    for issue in with_close_date:
-        issue_type = issue.get("type")
-        closed_dt = parse_sonar_date(issue["closeDate"])
-        wk2 = bucket_for(closed_dt)
-        if wk2 is not None:
-            closed[wk2] += 1
-            if issue_type in closed_by_type:
-                closed_by_type[issue_type] += 1
-
-    opened_series = [opened[w] for w in weeks]
-    closed_series = [closed[w] for w in weeks]
-
-    print("Fetching current open-issue total (snapshot, all-time)...")
-    currently_open = fetch_total_count(
-        token,
-        args.project,
-        args.branch,
-        {"statuses": "OPEN,CONFIRMED,REOPENED"},
-    )
-    print(f"Currently open: {currently_open}")
-
-    print("Fetching open-issue breakdown by type...")
-    open_by_type = fetch_open_by_type(
-        token,
-        args.project,
-        args.branch,
-        {"statuses": "OPEN,CONFIRMED,REOPENED"},
-    )
-    print(f"Open by type: {open_by_type}")
-
-    if args.lookback_buffer_weeks is not None:
-        note = (
-            f"'Created' counts issues created in the displayed window. 'Closed' counts "
-            f"issues whose closeDate falls in the window, searched among CLOSED issues "
-            f"created in the last {args.lookback_buffer_weeks} weeks before the window. "
-            "If closures still look too low, drop --lookback-buffer-weeks entirely to "
-            "search all closed issues regardless of creation date."
-        )
-    else:
-        note = (
-            "'Created' counts issues created in the displayed window. 'Closed' counts "
-            "issues whose closeDate falls in the window, searched across ALL closed "
-            "issues for this project regardless of when they were created."
+    projects_data = []
+    for key in project_keys:
+        print(f"\n=== {key} ===")
+        projects_data.append(
+            compute_project_data(token, key, args.branch, args.weeks, args.lookback_buffer_weeks)
         )
 
-    html = build_html(
-        args.project,
-        week_labels,
-        opened_series,
-        closed_series,
-        dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
-        note,
-        currently_open,
-        open_by_type,
-        created_by_type,
-        closed_by_type,
-    )
+    html = build_html(projects_data, dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"))
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nDashboard written to: {os.path.abspath(args.out)}")
