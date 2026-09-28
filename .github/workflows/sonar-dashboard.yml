@@ -3,16 +3,19 @@
 # What it does:
 #   - Runs on a schedule (default: every Monday 06:00 UTC) and on-demand
 #   - Calls the SonarCloud API server-side (no CORS issue there) via
-#     sonar_weekly_dashboard.py
-#   - Publishes the generated dashboard to GitHub Pages
+#     sonar_weekly_dashboard.py, for one or more projects
+#   - Publishes the generated dashboard (with a project switcher if there's
+#     more than one) to GitHub Pages
 #
 # One-time setup (see full instructions in chat):
 #   1. Put sonar_weekly_dashboard.py in the repo root (or update the path below)
 #   2. Repo Settings > Secrets and variables > Actions > New repository secret:
 #        SONAR_TOKEN = your SonarCloud token
 #   3. Repo Settings > Secrets and variables > Actions > Variables tab:
-#        SONAR_PROJECT_KEY = your SonarCloud project key
-#      (or just hardcode --project below if you don't mind it being public)
+#        SONAR_PROJECT_KEYS = comma-separated project keys, e.g.
+#          my-org_project-one,my-org_project-two,my-org_project-three
+#      (adding a new project later is just editing this one variable — no
+#      code or workflow changes needed)
 #   4. Repo Settings > Pages > Source: "GitHub Actions"
 
 name: Sonar Weekly Dashboard
@@ -46,12 +49,12 @@ jobs:
 
       - name: Generate dashboard
         env:
-          SONAR_TOKEN: 76e122a1797e52ab9df75b13a0d556e0ced1d987
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           mkdir -p public
           python3 sonar_weekly_dashboard.py \
-            --project infra-wizard_anon-ecommerce-website \
-            --weeks 12 \
+            --projects "${{ vars.SONAR_PROJECT_KEYS }}" \
+            --weeks 6 \
             --out public/index.html
 
       - name: Upload Pages artifact
