@@ -134,6 +134,37 @@ def fetch_open_by_type(token, project_key, branch, extra_params):
     return counts
 
 
+def load_history(path):
+    """Load the persisted snapshot history. Returns {} if the file doesn't exist yet."""
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        print(f"WARNING: could not read {path}, starting a fresh history.")
+        return {}
+
+
+def prune_history(history, days):
+    """Keep only entries whose date is within the last `days` days."""
+    cutoff = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=days - 1)
+    kept = {}
+    for date_str, entry in history.items():
+        try:
+            d = dt.datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if d >= cutoff:
+            kept[date_str] = entry
+    return kept
+
+
+def save_history(path, history):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(history, f, indent=2, sort_keys=True)
+
+
 def iso_week_start(d):
     monday = d - dt.timedelta(days=d.weekday())
     return dt.datetime(monday.year, monday.month, monday.day)
@@ -246,8 +277,8 @@ def compute_project_data(token, project, branch, weeks_n, lookback_buffer_weeks)
     }
 
 
-def build_html(projects, generated_at):
-    data = {"generated": generated_at, "projects": projects}
+def build_html(projects, generated_at, history):
+    data = {"generated": generated_at, "projects": projects, "history": history}
     return TEMPLATE.replace("__DATA__", json.dumps(data))
 
 
@@ -363,6 +394,12 @@ TEMPLATE = """<!DOCTYPE html>
   <div class="stats" id="stats"></div>
 
   <div class="card">
+    <div class="card-title">Currently open — last 30 days</div>
+    <canvas id="trendChart"></canvas>
+    <div class="note" id="trendNote"></div>
+  </div>
+
+  <div class="card">
     <canvas id="chart"></canvas>
   </div>
 
@@ -391,6 +428,7 @@ const TYPE_COLORS = { BUG: '#ef6c6c', VULNERABILITY: '#f0a35c', CODE_SMELL: '#7a
 
 let mainChart = null;
 let typeChart = null;
+let trendChart = null;
 
 const select = document.getElementById('projectSelect');
 DATA.projects.forEach((p, i) => {
@@ -418,6 +456,40 @@ function renderProject(idx) {
     <div class="stat"><div class="label">Closed in window</div><div class="value closed-color">${totalClosed}</div></div>
     <div class="stat"><div class="label">Net change (window)</div><div class="value net-color">${net >= 0 ? '+' + net : net}</div></div>
   `;
+
+  const historyDates = Object.keys(DATA.history).sort();
+  const trendSeries = historyDates.map(d => {
+    const entry = DATA.history[d][proj.project];
+    return entry ? entry.currentlyOpen : null;
+  });
+  if (trendChart) trendChart.destroy();
+  trendChart = new Chart(document.getElementById('trendChart'), {
+    type: 'line',
+    data: {
+      labels: historyDates,
+      datasets: [{
+        label: 'Currently open',
+        data: trendSeries,
+        borderColor: '#7aa8ff',
+        backgroundColor: 'rgba(122,168,255,0.15)',
+        fill: true,
+        tension: 0.25,
+        spanGaps: true,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#e6e8ee' } } },
+      scales: {
+        x: { ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } },
+        y: { beginAtZero: true, ticks: { color: '#9aa1b1' }, grid: { color: '#262a36' } }
+      }
+    }
+  });
+  document.getElementById('trendNote').textContent = historyDates.length < 2
+    ? 'Only one snapshot recorded so far — the trend fills in as this workflow runs on its schedule.'
+    : `${historyDates.length} snapshots recorded (${historyDates[0]} to ${historyDates[historyDates.length - 1]}).`;
 
   if (mainChart) mainChart.destroy();
   mainChart = new Chart(document.getElementById('chart'), {
@@ -534,6 +606,16 @@ def main():
              "or the run is too slow.",
     )
     ap.add_argument("--out", default="sonar_weekly_dashboard.html", help="Output HTML file path")
+    ap.add_argument(
+        "--history-file",
+        default="sonar_history.json",
+        help="Path to a JSON file that accumulates one 'currently open' snapshot per "
+             "day across runs, so the page can show a trend over time instead of just "
+             "this run's numbers. This file should be committed back to your repo "
+             "between runs (the provided GitHub Actions workflow does this) — it is "
+             "NOT the same as --out, which is build output and gets overwritten.",
+    )
+    ap.add_argument("--history-days", type=int, default=30, help="How many days of history to keep (default 30)")
     args = ap.parse_args()
 
     raw = args.projects if args.projects else args.project
@@ -561,7 +643,18 @@ def main():
             compute_project_data(token, key, args.branch, args.weeks, args.lookback_buffer_weeks)
         )
 
-    html = build_html(projects_data, dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"))
+    print(f"\nUpdating history file: {args.history_file}")
+    history = load_history(args.history_file)
+    today_str = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d")
+    history[today_str] = {
+        pd["project"]: {"currentlyOpen": pd["currentlyOpen"], "openByType": pd["openByType"]}
+        for pd in projects_data
+    }
+    history = prune_history(history, args.history_days)
+    save_history(args.history_file, history)
+    print(f"History now has {len(history)} day(s) on record (kept last {args.history_days} days).")
+
+    html = build_html(projects_data, dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"), history)
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"\nDashboard written to: {os.path.abspath(args.out)}")
