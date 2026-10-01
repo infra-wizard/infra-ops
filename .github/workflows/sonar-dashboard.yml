@@ -17,6 +17,13 @@
 #      (adding a new project later is just editing this one variable — no
 #      code or workflow changes needed)
 #   4. Repo Settings > Pages > Source: "GitHub Actions"
+#
+# Persisting a 30-day trend:
+#   The script keeps a running history of each day's "currently open" snapshot
+#   in sonar_history.json, committed back to the repo after each run (see the
+#   "Commit updated history file" step below). This is separate from the
+#   published dashboard itself, which is just build output and gets
+#   regenerated fresh every time. Needs `permissions: contents: write` below.
 
 name: Sonar Weekly Dashboard
 
@@ -26,7 +33,7 @@ on:
   workflow_dispatch: {}    # lets you trigger it manually from the Actions tab
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -54,8 +61,18 @@ jobs:
           mkdir -p public
           python3 sonar_weekly_dashboard.py \
             --projects "${{ vars.SONAR_PROJECT_KEYS }}" \
-            --weeks 6 \
-            --out public/index.html
+            --weeks 12 \
+            --out public/index.html \
+            --history-file sonar_history.json \
+            --history-days 30
+
+      - name: Commit updated history file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sonar_history.json
+          git diff --cached --quiet || git commit -m "Update Sonar issue history [skip ci]"
+          git push
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
