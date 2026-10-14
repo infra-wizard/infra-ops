@@ -5,6 +5,12 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      releasetag:
+        description: "Release tag (leave empty to use the short commit SHA)"
+        required: false
+        type: string
+        default: ""
 jobs:
   build:
     runs-on: ubuntu-latest
