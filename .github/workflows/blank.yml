@@ -5,11 +5,30 @@ on:
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
+    inputs:
+      releasetag:
+        description: "Release tag (leave empty to use the short commit SHA)"
+        required: false
+        type: string
+        default: ""
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set RELEASETAG
+        env:
+          INPUT_RELEASETAG: ${{ github.event.inputs.releasetag }}
+        run: |
+          RELEASETAG="$INPUT_RELEASETAG"
+          if [ -z "$RELEASETAG" ]; then
+            RELEASETAG="${GITHUB_SHA::7}"
+          fi
+          if ! [[ "$RELEASETAG" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "Invalid release tag: $RELEASETAG" >&2
+            exit 1
+          fi
+          echo "RELEASETAG=$RELEASETAG" >> "$GITHUB_ENV"
       - name: Run a one-line script
         run: echo Hello, world!
       - name: Run a multi-line script
